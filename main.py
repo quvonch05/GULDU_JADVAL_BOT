@@ -262,8 +262,12 @@ async def search_group(message: types.Message):
     # 2. Sizning qidiruvchi asosiy kodingiz shu yerdan davom etadi...
     # guruh_jadvali = await get_schedule(matn) 
     # agar topilmasa: "Bunday guruh topilmadi..."
+async def main():
+    # ... soxta veb-server kodlari ...
+    await site.start()
+    print(f"Soxta veb-server {port}-portda ishga tushdi.")
 
-    # 3. Botni ishga tushiramiz (o'zingizning botingizni yozasiz)
+    # Dastur o'chib qolmasligi va Telegramdan xabar kutishi uchun ushbu qator MUHIM:
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
