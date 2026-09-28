@@ -228,7 +228,28 @@ async def main():
     # Orqa fonda 30 daqiqalik eslatmalarni yoqish
     start_scheduler(bot)
     print("Avto-eslatma tizimi yoqildi.")
-    
+    import asyncio
+import os
+from aiohttp import web
+
+# ... bu yerda sizning oldingi kodlaringiz (routerlar, bot va hokazo) ...
+
+# 1. Soxta veb-server uchun oddiy sahifa yaratamiz
+async def handle_ping(request):
+    return web.Response(text="Bot is running! 24/7")
+
+async def main():
+    # 2. Render talab qilgan portni ochamiz
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000)) # Render bergan portni olamiz
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"Soxta veb-server {port}-portda ishga tushdi.")
+
+    # 3. Botni ishga tushiramiz (o'zingizning botingizni yozasiz)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
