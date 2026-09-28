@@ -5,7 +5,7 @@ from sqlalchemy import select
 import asyncio
 
 # Ma'lumotlar bazasi fayli manzili
-DB_URL = "postgresql+asyncpg://postgres.hctthovvcyvmsaosqtpl:Quvonch.0510@aws-0-eu-central-1.pooler.supabase.com:5432/postgres"
+DATABASE_URL = "postgresql+asyncpg://postgres.hctthovvcyvmsaosqtpl:Quvonch.0510@aws-0-eu-central-1.pooler.supabase.com:5432/postgres"
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
