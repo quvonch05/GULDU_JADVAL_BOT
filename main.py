@@ -263,11 +263,22 @@ async def search_group(message: types.Message):
     # guruh_jadvali = await get_schedule(matn) 
     # agar topilmasa: "Bunday guruh topilmadi..."
 async def main():
-    # ... soxta veb-server kodlari ...
+    # ... (boshqa kodlaringiz) ...
+
+    # Veb-serverni sozlash qismi to'liq shu ko'rinishda bo'lishi kerak:
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    
+    # MANA SHU QATOR TUSHIB QOLGAN:
+    site = web.TCPSite(runner, '0.0.0.0', port) 
+    
     await site.start()
     print(f"Soxta veb-server {port}-portda ishga tushdi.")
 
-    # Dastur o'chib qolmasligi va Telegramdan xabar kutishi uchun ushbu qator MUHIM:
+    # Botni ishga tushirish (bu qator eng oxirida turishi kerak)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
