@@ -11,7 +11,7 @@ from database import init_db, set_user_group, get_all_users_id
 from parser import get_faculties, get_forms, get_courses, get_groups, get_schedule_text, search_group_id
 from scheduler import start_scheduler
 
-BOT_TOKEN = "6341479635:AAEZxk4UCyt689jY7Xy2o5LmLQDR4huoa20"
+BOT_TOKEN = "8923062582:AAGcjkBTD714VDE0cSWEs_XYPL2PSIOHegI"
 ADMIN_ID = 1686406789
   # O'z profilingiz ID raqamini raqam formatida yozing (masalan: 135792468)
 
@@ -248,6 +248,22 @@ async def main():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     print(f"Soxta veb-server {port}-portda ishga tushdi.")
+  from aiogram import types, F
+
+# Sizning guruh qidiruvchi handleringiz (nomi boshqacha bo'lishi mumkin)
+@router.message(F.text) 
+async def search_group(message: types.Message):
+    matn = message.text
+    
+    # 1. Kiritilgan matn guruh formatiga mos kelishini tekshiramiz
+    # Odatda guruhlarda "-" belgisi bo'ladi va eng kamida 4 ta belgidan iborat bo'ladi (Masalan: 4-21)
+    if "-" not in matn or len(matn) < 4:
+        await message.reply("Noma'lum buyruq. Iltimos, menyudan foydalaning yoki guruh nomini to'g'ri formatda yozing (masalan: 10-26AT).")
+        return  # Kod shu yerda to'xtaydi va qidiruv tizimiga o'tib ketmaydi
+        
+    # 2. Sizning qidiruvchi asosiy kodingiz shu yerdan davom etadi...
+    # guruh_jadvali = await get_schedule(matn) 
+    # agar topilmasa: "Bunday guruh topilmadi..."
 
     # 3. Botni ishga tushiramiz (o'zingizning botingizni yozasiz)
     await dp.start_polling(bot)
