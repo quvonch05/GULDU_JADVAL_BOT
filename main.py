@@ -8,6 +8,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiohttp import web
 from aiogram import types, F
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from database import init_db, set_user_group, get_all_users_id
 from parser import get_faculties, get_forms, get_courses, get_groups, get_schedule_text, search_group_id
@@ -251,17 +253,21 @@ async def main():
     print(f"Soxta veb-server {port}-portda ishga tushdi.")
 
 # Sizning guruh qidiruvchi handleringiz (nomi boshqacha bo'lishi mumkin)
-@dp.message(F.text)
-async def search_group(message: types.Message):
-    # 1. Kiritilgan matn guruh formatiga mos kelishini tekshiramiz
-    # Odatda guruhlarda "-" belgisi bo'ladi va eng kamida 4 ta belgidan iborat bo'ladi (Masalan: 4-21)
+@dp.message(QidiruvHolati.guruh_kutilmoqda) 
+async def search_group(message: types.Message, state: FSMContext):
+    matn = message.text
+    
+    # Formatni tekshiramiz
     if "-" not in matn or len(matn) < 4:
-        await message.reply("Noma'lum buyruq. Iltimos, menyudan foydalaning yoki guruh nomini to'g'ri formatda yozing (masalan: 10-26AT).")
-        return  # Kod shu yerda to'xtaydi va qidiruv tizimiga o'tib ketmaydi
-        
-    # 2. Sizning qidiruvchi asosiy kodingiz shu yerdan davom etadi...
-    # guruh_jadvali = await get_schedule(matn) 
-    # agar topilmasa: "Bunday guruh topilmadi..."
+        await message.reply("Guruh formatida xatolik bor. Yana urinib ko'ring (masalan: 10-26AT):")
+        return # Qidiruvga o'tmaydi, lekin bot hamon kutish rejimida qoladi
+
+    kutish_xabari = await message.answer("⏳ Guruh bazadan qidirilmoqda...")
+    
+    # ... BAZADAN QIDIRISH KODLARINGIZ (shu yerda turadi) ...
+
+    # Qidiruv to'liq tugagach (javob topilsa ham, topilmasa ham) rejimni o'chiramiz:
+    await state.clear()
 async def main():
     # ... (boshqa kodlaringiz) ...
 
@@ -280,6 +286,15 @@ async def main():
 
     # Botni ishga tushirish (bu qator eng oxirida turishi kerak)
     await dp.start_polling(bot)
-
+  
+class QidiruvHolati(StatesGroup):
+    guruh_kutilmoqda = State()
+  # Tugma nomini o'zingiznikiga moslashtirasiz
+@dp.message(F.text == "🔍 Qidirish") 
+async def qidiruvni_boshlash(message: types.Message, state: FSMContext):
+    await message.answer("Guruh nomini kiriting (masalan: 10-26AT):")
+    # Botni "guruh nomini kutish" rejimiga o'tkazamiz:
+    await state.set_state(QidiruvHolati.guruh_kutilmoqda)
+  
 if __name__ == "__main__":
     asyncio.run(main())
