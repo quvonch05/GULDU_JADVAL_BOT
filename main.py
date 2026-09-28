@@ -7,7 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiohttp import web
- from aiogram import types, F
+from aiogram import types, F
 
 from database import init_db, set_user_group, get_all_users_id
 from parser import get_faculties, get_forms, get_courses, get_groups, get_schedule_text, search_group_id
