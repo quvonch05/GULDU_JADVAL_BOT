@@ -6,6 +6,8 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiohttp import web
+ from aiogram import types, F
 
 from database import init_db, set_user_group, get_all_users_id
 from parser import get_faculties, get_forms, get_courses, get_groups, get_schedule_text, search_group_id
@@ -230,7 +232,6 @@ async def main():
     print("Avto-eslatma tizimi yoqildi.")
     import asyncio
 import os
-from aiohttp import web
 
 # ... bu yerda sizning oldingi kodlaringiz (routerlar, bot va hokazo) ...
 
@@ -248,7 +249,6 @@ async def main():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     print(f"Soxta veb-server {port}-portda ishga tushdi.")
-  from aiogram import types, F
 
 # Sizning guruh qidiruvchi handleringiz (nomi boshqacha bo'lishi mumkin)
 @router.message(F.text) 
