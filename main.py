@@ -1,13 +1,12 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher, F
+import os
+from aiohttp import web
+
+from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiohttp import web
-from aiogram import types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -17,22 +16,25 @@ from scheduler import start_scheduler
 
 BOT_TOKEN = "8923062582:AAGcjkBTD714VDE0cSWEs_XYPL2PSIOHegI"
 ADMIN_ID = 1686406789
-  # O'z profilingiz ID raqamini raqam formatida yozing (masalan: 135792468)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Admin xabar tarqatishi uchun holat
+# --- HOLATLAR (FSM) ---
 class AdminStates(StatesGroup):
     waiting_for_broadcast = State()
 
+class QidiruvHolati(StatesGroup):
+    guruh_kutilmoqda = State()
+
+# --- START BUYRUG'I ---
 @dp.message(CommandStart())
-async def cmd_start(message: Message):
-    # Premium stiker (ID ni xohlagan stikeringizga almashtirishingiz mumkin)
+async def cmd_start(message: Message, state: FSMContext):
+    await state.clear() # Bosh menyuga qaytganda barcha kutish rejimlarini o'chiramiz
     try:
         await message.answer_sticker("CAACAgIAAxkBAAEK1eJlY_6K3F2Gv0yqQj6wA_J5cM9_AAO_AQAC7_L0CwVj5-VlRkY6MzQE")
     except Exception:
-        pass # Stiker ID noto'g'ri bo'lsa xato bermaydi
+        pass 
         
     text = (
         f"Assalomu alaykum, {message.from_user.first_name} 🍁🍂 👨‍🎓 👨‍💻!\n\n"
@@ -86,7 +88,7 @@ async def send_broadcast(message: Message, state: FSMContext):
         try:
             await message.send_copy(chat_id=uid)
             sent_count += 1
-            await asyncio.sleep(0.05) # Telegram bloklamasligi uchun
+            await asyncio.sleep(0.05) 
         except Exception:
             pass
             
@@ -94,7 +96,7 @@ async def send_broadcast(message: Message, state: FSMContext):
     await state.clear()
 
 
-# --- Asosiy Menyu Tugmalari ---
+# --- ASOSIY MENYU TUGMALARI ---
 @dp.callback_query(F.data == "menu_about")
 async def menu_about(call: CallbackQuery):
     text = "🤖 <b>GulDU Dars Jadvali Bot</b>\n\nBu bot orqali universitetdagi barcha dars jadvallarini qulay kuzatib borishingiz mumkin. \n\n✨ <i>Qo'shimcha imkoniyatlar:</i> Jadvaldagi o'zgarishlar va dars boshlanishidan 30 daqiqa oldin keladigan avto-eslatmalar."
@@ -105,19 +107,24 @@ async def menu_about(call: CallbackQuery):
     await call.message.edit_reply_markup(reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data == "menu_search")
-async def menu_search(call: CallbackQuery):
+async def menu_search(call: CallbackQuery, state: FSMContext):
     text = "🔍 <b>Guruh nomini yozib yuboring</b>\n\n(Masalan: <i>10-26AT</i>, <i>9-24AT</i> yoki <i>1-24F</i>):"
     await call.message.edit_text(text, parse_mode="HTML")
     builder = InlineKeyboardBuilder()
     builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
     await call.message.edit_reply_markup(reply_markup=builder.as_markup())
+    
+    # Qidiruv tugmasi bosilganda botni "Guruh kutilmoqda" rejimiga o'tkazamiz
+    await state.set_state(QidiruvHolati.guruh_kutilmoqda)
 
 @dp.callback_query(F.data == "menu_main")
-async def back_to_main(call: CallbackQuery):
-    await cmd_start(call.message)
+async def back_to_main(call: CallbackQuery, state: FSMContext):
+    await state.clear() # Menyuga qaytganda holatlarni tozalaymiz
+    await cmd_start(call.message, state)
     await call.message.delete()
 
-# --- Fakultet -> Shakl -> Kurs -> Guruh ---
+
+# --- FAKULTET -> SHAKL -> KURS -> GURUH ---
 @dp.callback_query(F.data == "menu_faculties")
 async def show_faculties(call: CallbackQuery):
     await call.message.edit_text("⏳ Fakultetlar ro'yxati yuklanmoqda...")
@@ -168,7 +175,8 @@ async def show_groups(call: CallbackQuery):
     builder.adjust(2)
     await call.message.edit_text("👥 Guruhni tanlang:", reply_markup=builder.as_markup())
 
-# --- Dars jadvalini ko'rsatish ---
+
+# --- DARS JADVALINI KO'RSATISH ---
 @dp.callback_query(F.data.startswith("grp_"))
 async def show_schedule(call: CallbackQuery):
     data_parts = call.data.split("_")
@@ -196,34 +204,52 @@ async def save_group(call: CallbackQuery):
     await set_user_group(call.from_user.id, group_name)
     await call.answer(f"✅ {group_name} guruhi avto-eslatmalar uchun saqlandi!", show_alert=True)
 
-# --- Matn orqali qidirish ---
-@dp.message()
+
+# --- MATN ORQALI QIDIRISH (Faqat kutish rejimida ishlaydi) ---
+@dp.message(QidiruvHolati.guruh_kutilmoqda)
 async def process_text_search(message: Message, state: FSMContext):
-    # Agar admin xabar yozyotgan bo'lsa, uni guruh deb qidirmaydi
-    current_state = await state.get_state()
-    if current_state == AdminStates.waiting_for_broadcast:
+    matn = message.text.strip().upper()
+    
+    # 1. Formatni tekshiramiz
+    if "-" not in matn or len(matn) < 4:
+        await message.reply("Guruh formatida xatolik bor. Yana urinib ko'ring (masalan: 10-26AT):")
         return
 
-    group_name = message.text.strip().upper()
     wait_msg = await message.answer("⏳ Guruh bazadan qidirilmoqda, 5-10 soniya kuting...")
     
-    group_id = await search_group_id(group_name)
+    # 2. Bazadan qidirish
+    group_id = await search_group_id(matn)
     
     if group_id:
-        schedule_text = await get_schedule_text(group_id, group_name, "haftalik")
+        schedule_text = await get_schedule_text(group_id, matn, "haftalik")
         
         builder = InlineKeyboardBuilder()
-        builder.button(text="📅 Bugun", callback_data=f"grp_{group_id}_{group_name}_bugun")
-        builder.button(text="⏰ Ertaga", callback_data=f"grp_{group_id}_{group_name}_ertaga")
-        builder.button(text="🟢 Haftalik", callback_data=f"grp_{group_id}_{group_name}_haftalik")
-        builder.button(text="📌 Mening guruhim qilib saqlash", callback_data=f"save_{group_name}")
+        builder.button(text="📅 Bugun", callback_data=f"grp_{group_id}_{matn}_bugun")
+        builder.button(text="⏰ Ertaga", callback_data=f"grp_{group_id}_{matn}_ertaga")
+        builder.button(text="🟢 Haftalik", callback_data=f"grp_{group_id}_{matn}_haftalik")
+        builder.button(text="📌 Mening guruhim qilib saqlash", callback_data=f"save_{matn}")
         builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
         builder.adjust(3, 1, 1)
         
         await wait_msg.delete()
         await message.answer(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
+        await state.clear() # Qidiruv muvaffaqiyatli yakunlangach, kutish rejimidan chiqamiz
     else:
         await wait_msg.edit_text("❌ Bunday guruh topilmadi. To'g'ri yozilganiga ishonch hosil qiling (masalan: 10-26AT).")
+        # Foydalanuvchi qayta urinib ko'rishi uchun kutish rejimini o'chirmaymiz
+
+# --- BOSHQALAR (Tasodifiy xabarlarni tutib qolish) ---
+@dp.message()
+async def boshqa_xabarlar(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state == AdminStates.waiting_for_broadcast.state:
+        return
+    await message.reply("Iltimos, kerakli amallarni bajarish uchun pastdagi menyu tugmalaridan foydalaning.")
+
+
+# --- SOXTA VEB-SERVER VA ASOSIY ISHGA TUSHIRISH ---
+async def handle_ping(request):
+    return web.Response(text="Bot is running! 24/7")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
@@ -232,69 +258,20 @@ async def main():
     # Orqa fonda 30 daqiqalik eslatmalarni yoqish
     start_scheduler(bot)
     print("Avto-eslatma tizimi yoqildi.")
-    import asyncio
-import os
-
-# ... bu yerda sizning oldingi kodlaringiz (routerlar, bot va hokazo) ...
-
-# 1. Soxta veb-server uchun oddiy sahifa yaratamiz
-async def handle_ping(request):
-    return web.Response(text="Bot is running! 24/7")
-
-async def main():
-    # 2. Render talab qilgan portni ochamiz
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 10000)) # Render bergan portni olamiz
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    print(f"Soxta veb-server {port}-portda ishga tushdi.")
-
-# Sizning guruh qidiruvchi handleringiz (nomi boshqacha bo'lishi mumkin)
-@dp.message(QidiruvHolati.guruh_kutilmoqda) 
-async def search_group(message: types.Message, state: FSMContext):
-    matn = message.text
     
-    # Formatni tekshiramiz
-    if "-" not in matn or len(matn) < 4:
-        await message.reply("Guruh formatida xatolik bor. Yana urinib ko'ring (masalan: 10-26AT):")
-        return # Qidiruvga o'tmaydi, lekin bot hamon kutish rejimida qoladi
-
-    kutish_xabari = await message.answer("⏳ Guruh bazadan qidirilmoqda...")
-    
-    # ... BAZADAN QIDIRISH KODLARINGIZ (shu yerda turadi) ...
-
-    # Qidiruv to'liq tugagach (javob topilsa ham, topilmasa ham) rejimni o'chiramiz:
-    await state.clear()
-async def main():
-    # ... (boshqa kodlaringiz) ...
-
-    # Veb-serverni sozlash qismi to'liq shu ko'rinishda bo'lishi kerak:
+    # Render talab qilgan portni ochish
     app = web.Application()
     app.router.add_get('/', handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 10000))
-    
-    # MANA SHU QATOR TUSHIB QOLGAN:
     site = web.TCPSite(runner, '0.0.0.0', port) 
     
     await site.start()
     print(f"Soxta veb-server {port}-portda ishga tushdi.")
 
-    # Botni ishga tushirish (bu qator eng oxirida turishi kerak)
+    # Botni ishga tushirish
     await dp.start_polling(bot)
-  
-class QidiruvHolati(StatesGroup):
-    guruh_kutilmoqda = State()
-  # Tugma nomini o'zingiznikiga moslashtirasiz
-@dp.message(F.text == "🔍 Qidirish") 
-async def qidiruvni_boshlash(message: types.Message, state: FSMContext):
-    await message.answer("Guruh nomini kiriting (masalan: 10-26AT):")
-    # Botni "guruh nomini kutish" rejimiga o'tkazamiz:
-    await state.set_state(QidiruvHolati.guruh_kutilmoqda)
-  
+
 if __name__ == "__main__":
     asyncio.run(main())
