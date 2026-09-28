@@ -244,7 +244,7 @@ async def boshqa_xabarlar(message: Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state == AdminStates.waiting_for_broadcast.state:
         return
-    await message.reply("Iltimos, kerakli amallarni bajarish uchun pastdagi menyu tugmalaridan foydalaning.")
+    await message.reply("Iltimos, kerakli amallarni bajarish uchun /start buyrug'idan foydalaning.")
 
 
 # --- SOXTA VEB-SERVER VA ASOSIY ISHGA TUSHIRISH ---
