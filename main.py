@@ -251,10 +251,8 @@ async def main():
     print(f"Soxta veb-server {port}-portda ishga tushdi.")
 
 # Sizning guruh qidiruvchi handleringiz (nomi boshqacha bo'lishi mumkin)
-@router.message(F.text) 
+@dp.message(F.text)
 async def search_group(message: types.Message):
-    matn = message.text
-    
     # 1. Kiritilgan matn guruh formatiga mos kelishini tekshiramiz
     # Odatda guruhlarda "-" belgisi bo'ladi va eng kamida 4 ta belgidan iborat bo'ladi (Masalan: 4-21)
     if "-" not in matn or len(matn) < 4:
