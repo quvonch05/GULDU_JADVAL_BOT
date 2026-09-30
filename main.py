@@ -27,19 +27,14 @@ class AdminStates(StatesGroup):
 class QidiruvHolati(StatesGroup):
     guruh_kutilmoqda = State()
 
-# --- START BUYRUG'I VA ASOSIY MENYU ---
-@dp.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
+
+# --- ASOSIY MENYU CHIZUVCHI YORDAMCHI FUNKSIYA ---
+async def send_main_menu(message: Message, user_id: int, first_name: str, state: FSMContext):
     await state.clear() 
-    try:
-        await message.answer_sticker("CAACAgIAAxkBAAEK1eJlY_6K3F2Gv0yqQj6wA_J5cM9_AAO_AQAC7_L0CwVj5-VlRkY6MzQE")
-    except Exception:
-        pass 
-        
-    saved_group = await get_user_group(message.from_user.id)
-        
+    saved_group = await get_user_group(user_id)
+    
     text = (
-        f"Assalomu alaykum, {message.from_user.first_name} 🍁🍂 👨‍🎓 👨‍💻!\n\n"
+        f"Assalomu alaykum, {first_name} 🍁🍂 👨‍🎓 👨‍💻!\n\n"
         "🏛 <b>GulDU Dars Jadvali Tizimi</b> ✨\n"
         "<i>Guliston Davlat Universiteti rasmiy dars jadvallarini qulay kuzatib boring.</i>\n\n"
         "Kerakli bo'limni tanlang:\n"
@@ -69,6 +64,19 @@ async def cmd_start(message: Message, state: FSMContext):
     
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
+
+# --- START BUYRUG'I ---
+@dp.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext):
+    try:
+        await message.answer_sticker("CAACAgIAAxkBAAEK1eJlY_6K3F2Gv0yqQj6wA_J5cM9_AAO_AQAC7_L0CwVj5-VlRkY6MzQE")
+    except Exception:
+        pass 
+        
+    await send_main_menu(message, message.from_user.id, message.from_user.first_name, state)
+
+
+# --- MENING GURUHIM TUGMASI ---
 @dp.callback_query(F.data.startswith("mygrp_"))
 async def show_my_group(call: CallbackQuery):
     group_name = call.data.split("_")[1]
@@ -139,8 +147,8 @@ async def menu_search(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "menu_main")
 async def back_to_main(call: CallbackQuery, state: FSMContext):
-    await cmd_start(call.message, state)
     await call.message.delete()
+    await send_main_menu(call.message, call.from_user.id, call.from_user.first_name, state)
 
 
 # --- FAKULTET -> SHAKL -> KURS -> GURUH ---
@@ -177,7 +185,7 @@ async def show_courses(call: CallbackQuery):
     for kid, name in courses.items():
         builder.button(text=f"📘 {name}", callback_data=f"crs_{fakul_id}_{t_shakli_id}_{kid}")
     builder.button(text="🔙 Ta'lim shakllari", callback_data=f"fac_{fakul_id}")
-    builder.button(text="👨‍🏫 Bosh menyu", callback_data="menu_main")
+    builder.button(text="👨‍‍🏫 Bosh menyu", callback_data="menu_main")
     builder.adjust(2, 2)
     await call.message.edit_text("📘 Kursni tanlang:", reply_markup=builder.as_markup())
 
@@ -218,14 +226,13 @@ async def show_schedule(call: CallbackQuery):
     await call.message.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
 
 @dp.callback_query(F.data.startswith("save_"))
-async def save_group(call: CallbackQuery):
+async def save_group(call: CallbackQuery, state: FSMContext):
     group_name = call.data.split("_")[1]
     await set_user_group(call.from_user.id, group_name)
     await call.answer(f"✅ {group_name} guruhi avto-eslatmalar uchun saqlandi!", show_alert=True)
     
-    # Guruh saqlangach, menyuni yangilash uchun start funksiyasini chaqiramiz
-    await cmd_start(call.message, state=FSMContext)
     await call.message.delete()
+    await send_main_menu(call.message, call.from_user.id, call.from_user.first_name, state)
 
 
 # --- MATN ORQALI QIDIRISH (FSM KUTISH REJIMI) ---
