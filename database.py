@@ -28,14 +28,12 @@ async def init_db():
 async def set_user_group(telegram_id: int, group_name: str):
     async with AsyncSessionLocal() as session:
         # Baza ichidan bu foydalanuvchini qidiramiz
-        result = await session.execute(User.__table__.select().where(User.telegram_id == telegram_id))
-        user = result.fetchone()
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
         
         if user:
             # Agar oldin ro'yxatdan o'tgan bo'lsa, guruhini yangilaymiz
-            await session.execute(
-                User.__table__.update().where(User.telegram_id == telegram_id).values(group_name=group_name)
-            )
+            user.group_name = group_name
         else:
             # Yangi foydalanuvchi bo'lsa, bazaga qo'shamiz
             new_user = User(telegram_id=telegram_id, group_name=group_name)
@@ -46,26 +44,25 @@ async def set_user_group(telegram_id: int, group_name: str):
 # Foydalanuvchining saqlangan guruhini bazadan chaqirib olish
 async def get_user_group(telegram_id: int):
     async with AsyncSessionLocal() as session:
-        result = await session.execute(User.__table__.select().where(User.telegram_id == telegram_id))
-        user = result.fetchone()
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
         return user.group_name if user else None
-    
-# Mavjud kodlar tagidan qo'shing...
 
+# Barcha foydalanuvchilarning ID raqamlarini ro'yxat qilib qaytaradi (Admin xabar tarqatishi uchun)
 async def get_all_users_id():
-    """Barcha foydalanuvchilarning ID raqamlarini ro'yxat qilib qaytaradi (Admin xabar tarqatishi uchun)."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(User.telegram_id))
-        return [row[0] for row in result.fetchall()]
+        return list(result.scalars().all())
 
+# Faqatgina ro'yxatdan o'tgan (kuzatilayotgan) guruhlar nomini qaytaradi (Eslatma uchun)
 async def get_active_groups():
-    """Faqatgina ro'yxatdan o'tgan (kuzatilayotgan) guruhlar nomini qaytaradi (Eslatma uchun)."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(User.group_name).distinct())
-        return [row[0] for row in result.fetchall() if row[0]]
+        # Bo'sh (None) bo'lmagan guruhlarni filtrlab qaytaramiz
+        return [grp for grp in result.scalars().all() if grp]
 
+# Bitta guruhga tegishli barcha talabalar ID larini qaytaradi (30 daqiqalik eslatmalar yuborish uchun)
 async def get_users_by_group(group_name: str):
-    """Bitta guruhga tegishli barcha talabalar ID larini qaytaradi."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(User.telegram_id).where(User.group_name == group_name))
-        return [row[0] for row in result.fetchall()]
+        return list(result.scalars().all())
