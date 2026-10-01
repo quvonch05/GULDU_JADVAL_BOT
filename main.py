@@ -12,7 +12,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from database import init_db, set_user_group, get_all_users_id, get_user_group
+# Tepadagi importga get_active_groups ham qo'shildi
+from database import init_db, set_user_group, get_all_users_id, get_user_group, get_active_groups
 from parser import (
     get_faculties, get_forms, get_courses, get_groups, 
     get_schedule_text, search_group_id, search_teacher_schedule, get_empty_rooms
@@ -20,7 +21,9 @@ from parser import (
 from scheduler import start_scheduler
 
 BOT_TOKEN = "8923062582:AAGcjkBTD714VDE0cSWEs_XYPL2PSIOHegI"
-ADMIN_ID = 1686406789
+
+# Adminlar ro'yxati (shu yerdan nazorat qilasiz)
+ADMIN_IDS = [1686406789] 
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -111,7 +114,6 @@ async def menu_teacher_search(call: CallbackQuery, state: FSMContext):
 @dp.message(QidiruvHolati.oqituvchi_kutilmoqda)
 async def process_teacher_search(message: Message, state: FSMContext):
     teacher_name = message.text.strip()
-    # XATO TUZATILDI: parse_mode="HTML" qo'shildi
     wait_msg = await message.answer(f"⏳ <b>{teacher_name}</b> ismli o'qituvchi jadvali qidirilmoqda, kuting...", parse_mode="HTML")
     
     schedule_text = await search_teacher_schedule(teacher_name)
@@ -270,21 +272,9 @@ async def process_group_search(message: Message, state: FSMContext):
     else:
         await wait_msg.edit_text("❌ Bunday guruh topilmadi.")
 
-# --- TASODIFIY XABARLAR UCHUN ---
-@dp.message()
-async def boshqa_xabarlar(message: Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state == AdminStates.waiting_for_broadcast.state:
-        return
-    await message.reply("Iltimos, kerakli amallarni bajarish uchun pastdagi menyu tugmalaridan foydalaning.")
-
-# Tepadagi importlar qatorida get_active_groups borligiga ishonch hosil qiling:
-# from database import get_all_users_id, get_user_group, get_active_groups
-
-# Adminlar ro'yxati (Agar boshqa profilingiz bo'lsa, vergul bilan qo'shib ketaverasiz)
-ADMIN_IDS = [1686406789, 135792468] 
-
-# --- YORDAMCHI ADMIN MENYU FUNKSIYASI ---
+# ======================================================================
+# --- ADMIN PANEL FUNKSIYALARI (HAMMASI BIR JOYDA) ---
+# ======================================================================
 async def show_admin_menu(message_or_call):
     text = "👨‍💻 <b>Boshqaruv Paneli</b>\n\nTizim to'liq sizning nazoratingizda. Kerakli amalni tanlang:"
     builder = InlineKeyboardBuilder()
@@ -299,8 +289,6 @@ async def show_admin_menu(message_or_call):
     else:
         await message_or_call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-
-# --- ADMIN BUYRUG'I (KIRISH) ---
 @dp.message(Command("admin"))
 async def admin_panel(message: Message, state: FSMContext):
     if message.from_user.id not in ADMIN_IDS:
@@ -308,8 +296,6 @@ async def admin_panel(message: Message, state: FSMContext):
     await state.clear() # Har qanday qotib qolgan kutish rejimini tozalaydi
     await show_admin_menu(message)
 
-
-# --- STATISTIKA ---
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats(call: CallbackQuery):
     if call.from_user.id not in ADMIN_IDS: return
@@ -325,8 +311,6 @@ async def admin_stats(call: CallbackQuery):
     builder.button(text="🔙 Orqaga", callback_data="admin_back")
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-
-# --- KESHNI MAJBURIY YANGILASH ---
 @dp.callback_query(F.data == "admin_refresh")
 async def admin_refresh(call: CallbackQuery):
     if call.from_user.id not in ADMIN_IDS: return
@@ -340,8 +324,6 @@ async def admin_refresh(call: CallbackQuery):
     builder.button(text="🔙 Orqaga", callback_data="admin_back")
     await call.message.edit_text("✅ <b>Ma'lumotlar bazasi muvaffaqiyatli yangilandi!</b>\nO'qituvchilar va xonalar ma'lumoti eng so'nggi holatga keltirildi.", reply_markup=builder.as_markup(), parse_mode="HTML")
 
-
-# --- XABAR TARQATISH ---
 @dp.callback_query(F.data == "admin_broadcast")
 async def ask_broadcast_msg(call: CallbackQuery, state: FSMContext):
     if call.from_user.id not in ADMIN_IDS: return
@@ -371,8 +353,6 @@ async def send_broadcast(message: Message, state: FSMContext):
     await message.answer(f"✅ Xabar <b>{sent_count} ta</b> foydalanuvchiga muvaffaqiyatli yuborildi!", parse_mode="HTML")
     await show_admin_menu(message)
 
-
-# --- ORQAGA VA YOPISH ---
 @dp.callback_query(F.data == "admin_back")
 async def admin_back(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -382,9 +362,22 @@ async def admin_back(call: CallbackQuery, state: FSMContext):
 async def admin_close(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.message.delete()
-    await state.clear()
 
+
+# ======================================================================
+# --- TASODIFIY XABARLAR UCHUN (ENG OXIRIDA TURISHI SHART!) ---
+# ======================================================================
+@dp.message()
+async def boshqa_xabarlar(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state == AdminStates.waiting_for_broadcast.state:
+        return
+    await message.reply("🙂 Iltimos, kerakli amallarni bajarish uchun /start buyrug'idan foydalaning.")
+
+
+# ======================================================================
 # --- SOXTA VEB-SERVER VA ISHGA TUSHIRISH ---
+# ======================================================================
 async def handle_ping(request):
     return web.Response(text="Bot is running! 24/7")
 
