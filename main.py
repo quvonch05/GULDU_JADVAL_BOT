@@ -43,11 +43,11 @@ async def send_main_menu(message: Message, user_id: int, first_name: str, state:
     
     text = (
         f"Assalomu alaykum, {first_name}!\n\n"
-        "<tg-emoji emoji-id='5438496463044752972'><b>GulDU Dars Jadvali Tizimi</b>\n"
+        "🏛 <b>GulDU Dars Jadvali Tizimi</b> ✨\n"
         "<i>Guliston Davlat Universiteti rasmiy dars jadvallarini qulay kuzatib boring.</i>\n\n"
         "Kerakli bo'limni tanlang:\n"
-        "• <tg-emoji emoji-id='5341715473882955310'><b>Fakultetlar bo'yicha:</b> Bosqichma-bosqich qidirish\n"
-        "• <tg-emoji emoji-id='5874960879434338403'><b>Guruhni qidirish:</b> Nom bo'yicha lahzada topish"
+        "• 👨‍🏫 <b>Fakultetlar bo'yicha:</b> Bosqichma-bosqich qidirish\n"
+        "• 🎯 <b>Guruhni qidirish:</b> Nom bo'yicha lahzada topish"
     )
     
     if saved_group:
