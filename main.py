@@ -278,36 +278,110 @@ async def boshqa_xabarlar(message: Message, state: FSMContext):
         return
     await message.reply("Iltimos, kerakli amallarni bajarish uchun pastdagi menyu tugmalaridan foydalaning.")
 
-# --- ADMIN PANEL ---
-@dp.message(Command("admin"))
-async def admin_panel(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    users = await get_all_users_id()
-    builder = InlineKeyboardBuilder()
-    builder.button(text="📢 Barchaga xabar yuborish", callback_data="admin_broadcast")
-    await message.answer(f"👨‍💻 <b>Boshqaruv Paneli</b>\n\n👥 Jami: <b>{len(users)} ta</b>", reply_markup=builder.as_markup(), parse_mode="HTML")
+# Tepadagi importlar qatorida get_active_groups borligiga ishonch hosil qiling:
+# from database import get_all_users_id, get_user_group, get_active_groups
 
+# Adminlar ro'yxati (Agar boshqa profilingiz bo'lsa, vergul bilan qo'shib ketaverasiz)
+ADMIN_IDS = [1686406789, 135792468] 
+
+# --- YORDAMCHI ADMIN MENYU FUNKSIYASI ---
+async def show_admin_menu(message_or_call):
+    text = "👨‍💻 <b>Boshqaruv Paneli</b>\n\nTizim to'liq sizning nazoratingizda. Kerakli amalni tanlang:"
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📊 Statistika", callback_data="admin_stats")
+    builder.button(text="📢 Xabar tarqatish", callback_data="admin_broadcast")
+    builder.button(text="🔄 Keshni yangilash", callback_data="admin_refresh")
+    builder.button(text="❌ Yopish", callback_data="admin_close")
+    builder.adjust(2, 1, 1)
+    
+    if isinstance(message_or_call, Message):
+        await message_or_call.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    else:
+        await message_or_call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+# --- ADMIN BUYRUG'I (KIRISH) ---
+@dp.message(Command("admin"))
+async def admin_panel(message: Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    await state.clear() # Har qanday qotib qolgan kutish rejimini tozalaydi
+    await show_admin_menu(message)
+
+
+# --- STATISTIKA ---
+@dp.callback_query(F.data == "admin_stats")
+async def admin_stats(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS: return
+    users = await get_all_users_id()
+    active_groups = await get_active_groups()
+    
+    text = (
+        "📊 <b>Tizim Statistikasi</b>\n\n"
+        f"👥 Jami ro'yxatdan o'tganlar: <b>{len(users)} ta</b>\n"
+        f"📚 Kuzatilayotgan guruhlar: <b>{len(active_groups)} ta</b>"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Orqaga", callback_data="admin_back")
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+# --- KESHNI MAJBURIY YANGILASH ---
+@dp.callback_query(F.data == "admin_refresh")
+async def admin_refresh(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS: return
+    await call.answer("⏳ Bazadan yangi jadvallar yuklanmoqda...", show_alert=False)
+    
+    import parser
+    parser._LAST_CACHE_TIME = None # Kesh vaqtini nolga tushiramiz
+    await parser._fetch_all_schedules() # Bazani majburiy yangilaymiz
+    
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Orqaga", callback_data="admin_back")
+    await call.message.edit_text("✅ <b>Ma'lumotlar bazasi muvaffaqiyatli yangilandi!</b>\nO'qituvchilar va xonalar ma'lumoti eng so'nggi holatga keltirildi.", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+# --- XABAR TARQATISH ---
 @dp.callback_query(F.data == "admin_broadcast")
 async def ask_broadcast_msg(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
-        return
-    await call.message.edit_text("✍️ Tarqatmoqchi bo'lgan xabaringizni yuboring:")
+    if call.from_user.id not in ADMIN_IDS: return
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Bekor qilish", callback_data="admin_back")
+    await call.message.edit_text("✍️ <b>Tarqatmoqchi bo'lgan xabaringizni yuboring:</b>\n\n(Matn, rasm yoki video qabul qilinadi)", reply_markup=builder.as_markup(), parse_mode="HTML")
     await state.set_state(AdminStates.waiting_for_broadcast)
 
 @dp.message(AdminStates.waiting_for_broadcast)
 async def send_broadcast(message: Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS: return
+    
     users = await get_all_users_id()
     sent_count = 0
-    await message.answer("⏳ Xabar tarqatilmoqda...")
+    wait_msg = await message.answer("⏳ Xabar tarqatilmoqda, tizimdan chiqmang...")
+    
     for uid in users:
         try:
             await message.send_copy(chat_id=uid)
             sent_count += 1
-            await asyncio.sleep(0.05) 
+            await asyncio.sleep(0.05) # Telegram blokiga tushmaslik uchun
         except Exception:
             pass
-    await message.answer(f"✅ Xabar <b>{sent_count}</b> kishiga yuborildi!", parse_mode="HTML")
+            
+    await state.clear()
+    await wait_msg.delete()
+    await message.answer(f"✅ Xabar <b>{sent_count} ta</b> foydalanuvchiga muvaffaqiyatli yuborildi!", parse_mode="HTML")
+    await show_admin_menu(message)
+
+
+# --- ORQAGA VA YOPISH ---
+@dp.callback_query(F.data == "admin_back")
+async def admin_back(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await show_admin_menu(call)
+
+@dp.callback_query(F.data == "admin_close")
+async def admin_close(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await call.message.delete()
     await state.clear()
 
 # --- SOXTA VEB-SERVER VA ISHGA TUSHIRISH ---
