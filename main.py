@@ -20,7 +20,7 @@ from parser import (
 )
 from scheduler import start_scheduler
 
-BOT_TOKEN = "8923062582:AAGcjkBTD714VDE0cSWEs_XYPL2PSIOHegI"
+BOT_TOKEN = "8923062582:AAG5vTUre0w4l5Ih2qq9rl9z-lseBVewT_0"
 
 # Adminlar ro'yxati (shu yerdan nazorat qilasiz)
 ADMIN_IDS = [1686406789] 
