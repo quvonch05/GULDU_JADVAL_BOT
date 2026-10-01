@@ -19,6 +19,7 @@ from parser import (
 )
 from scheduler import start_scheduler
 
+# DIQQAT: Botfather'dan berilgan YANGI tokenni shu yerga qo'yishni unutmang!
 BOT_TOKEN = "8923062582:AAF8Vl3F0wTufeF3uZ8XEFbrpvu21XUbQy4"
 ADMIN_IDS = [1686406789] 
 
@@ -33,8 +34,8 @@ class QidiruvHolati(StatesGroup):
     guruh_kutilmoqda = State()
     oqituvchi_kutilmoqda = State()
 
-# --- ASOSIY MENYU CHIZUVCHI FUNKSIYA ---
-async def send_main_menu(message: Message, user_id: int, first_name: str, state: FSMContext):
+# --- ASOSIY MENYU CHIZUVCHI FUNKSIYA (TEZLASHTIRILDI) ---
+async def send_main_menu(event: Message | CallbackQuery, user_id: int, first_name: str, state: FSMContext):
     await state.clear() 
     saved_group = await get_user_group(user_id)
     
@@ -69,7 +70,14 @@ async def send_main_menu(message: Message, user_id: int, first_name: str, state:
     else:
         builder.adjust(2, 2, 1)
     
-    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    # Agar foydalanuvchi tugma bosa (CallbackQuery) ekranni miltillatmay tez tahrirlaymiz
+    if isinstance(event, CallbackQuery):
+        try:
+            await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        except Exception:
+            pass
+    else: # Agar /start yozsa oddiy xabar qilib jo'natamiz
+        await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 # --- START BUYRUG'I ---
 @dp.message(CommandStart())
@@ -176,15 +184,15 @@ async def menu_about(call: CallbackQuery):
         "🎯 <b>Guruhni qidirish:</b> Eng tezkor usul. Guruh nomini (masalan: <i>9-24AT</i>) yozib yuboring va jadvalni lahzada oling.\n"
         "🏛 <b>Fakultetlar bo'yicha:</b> Agar guruh nomini aniq bilmasangiz, fakultet, kurs va ta'lim shaklini tanlash orqali bosqichma-bosqich qidirishingiz mumkin.\n"
         "👨‍🏫 <b>O'qituvchi jadvali:</b> Ustozingiz qachon, qaysi guruhga va qayerda dars o'tayotganini bilmoqchimisiz? Shunchaki ism-sharifini yozib qidiring.\n"
-        "🚪 <b>Bo'sh auditoriyalar:</b> Darsingiz bo'lmagan vaqtda qayerda dars tayyorlashni bilmayapsizmi? Bino nomini tanlang va ayni shu daqiqada qaysi xonalar bo'sh ekanligini, bandlarida esa qaysi guruh o'tirganini ko'ring.\n\n"
+        "🚪 <b>Bo'sh auditoriyalar:</b> Bino nomini tanlang va ayni shu daqiqada qaysi xonalar bo'sh ekanligini, bandlarida esa qaysi guruh o'tirganini ko'ring.\n\n"
         "⭐ <b>Maxsus Imkoniyat (Mening guruhim)</b>\n"
         "O'z guruhingizni topgach, pastdagi <i>«📌 Asosiy guruh qilib saqlash»</i> tugmasini bosing. Shundan so'ng, Asosiy menyuda siz uchun maxsus tezkor tugma paydo bo'ladi. Dars boshlanishiga 30 daqiqa qolganda va jadvalda o'zgarish bo'lsa, bot sizga avtomatik eslatma yuboradi!\n\n"
-        "<i>Eslatma: Barcha ma'lumotlar to'g'ridan-to'g'ri GulDU rasmiy bazasidan (data.guldu.uz) olinadi.</i>\n\n"
+        "<i>Eslatma: Barcha ma'lumotlar to'g'ridan-to'g'ri GulDU rasmiy bazasidan olinadi.</i>\n\n"
         "👨‍💻 <b>Dasturchi:</b> Quvonchbek Baratov"
     )
     builder = InlineKeyboardBuilder()
-    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    builder.button(text="👨‍🏫 Asosiy menyuga qaytish", callback_data="menu_main")
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
 
 @dp.callback_query(F.data == "menu_search")
 async def menu_search(call: CallbackQuery, state: FSMContext):
@@ -194,10 +202,10 @@ async def menu_search(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await state.set_state(QidiruvHolati.guruh_kutilmoqda)
 
+# (O'ZGARISH) ASOSIY MENYUGA QAYTISH TEZLASHTIRILDI
 @dp.callback_query(F.data == "menu_main")
 async def back_to_main(call: CallbackQuery, state: FSMContext):
-    await call.message.delete()
-    await send_main_menu(call.message, call.from_user.id, call.from_user.first_name, state)
+    await send_main_menu(call, call.from_user.id, call.from_user.first_name, state)
 
 # --- FAKULTET -> SHAKL -> KURS -> GURUH ---
 @dp.callback_query(F.data == "menu_faculties")
@@ -272,13 +280,13 @@ async def show_schedule(call: CallbackQuery):
     
     await call.message.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
 
+# (O'ZGARISH) GURUH SAQLANGANIDA TEZ ORQAGA QAYTISH
 @dp.callback_query(F.data.startswith("save_"))
 async def save_group(call: CallbackQuery, state: FSMContext):
     group_name = call.data.split("_")[1]
     await set_user_group(call.from_user.id, group_name)
     await call.answer(f"✅ {group_name} guruhi avto-eslatmalar uchun saqlandi!", show_alert=True)
-    await call.message.delete()
-    await send_main_menu(call.message, call.from_user.id, call.from_user.first_name, state)
+    await send_main_menu(call, call.from_user.id, call.from_user.first_name, state)
 
 # --- MATN ORQALI GURUH QIDIRISH (FSM) ---
 @dp.message(QidiruvHolati.guruh_kutilmoqda)
