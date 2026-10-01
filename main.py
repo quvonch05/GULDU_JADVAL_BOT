@@ -111,7 +111,8 @@ async def menu_teacher_search(call: CallbackQuery, state: FSMContext):
 @dp.message(QidiruvHolati.oqituvchi_kutilmoqda)
 async def process_teacher_search(message: Message, state: FSMContext):
     teacher_name = message.text.strip()
-    wait_msg = await message.answer(f"⏳ <b>{teacher_name}</b> ismli o'qituvchi jadvali qidirilmoqda, kuting...")
+    # XATO TUZATILDI: parse_mode="HTML" qo'shildi
+    wait_msg = await message.answer(f"⏳ <b>{teacher_name}</b> ismli o'qituvchi jadvali qidirilmoqda, kuting...", parse_mode="HTML")
     
     schedule_text = await search_teacher_schedule(teacher_name)
     builder = InlineKeyboardBuilder()
@@ -122,7 +123,7 @@ async def process_teacher_search(message: Message, state: FSMContext):
         await state.clear()
     else:
         await wait_msg.edit_text(
-            f"❌ <b>{teacher_name}</b> ismli o'qituvchi topilmadi yoki uning darslari yo'q.\nIltimos, ism-sharifni to'g'ri kiriting.", 
+            f"❌ <b>{teacher_name}</b> ismli o'qituvchi topilmadi yoki jadvali yo'q.\nIltimos, qayta kiriting.", 
             reply_markup=builder.as_markup(), parse_mode="HTML"
         )
 
@@ -317,6 +318,10 @@ async def main():
     logging.basicConfig(level=logging.INFO)
     await init_db()
     start_scheduler(bot)
+    
+    # YANGI QO'SHILGAN QISMI: Bot yonganda jadvallarni orqa fonda sekin yuklashni boshlaydi
+    from parser import _fetch_all_schedules
+    asyncio.create_task(_fetch_all_schedules())
     
     app = web.Application()
     app.router.add_get('/', handle_ping)
