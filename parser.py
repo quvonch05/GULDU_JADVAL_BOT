@@ -11,6 +11,13 @@ _ALL_SCHEDULES_CACHE = []
 _LAST_CACHE_TIME = None
 _IS_CACHING = False 
 
+# Binolar va ularga tegishli xonalar ro'yxati (Universitetingizga qarab xonalarni ko'paytiring)
+BUILDING_ROOMS = {
+    "Bosh bino": ["101-xona", "102-xona", "103-xona", "507-xona"],
+    "Fizika-Matematika": ["201-xona", "202-xona", "205-xona"],
+    "Tabiiy fanlar": ["301-xona", "305-xona", "401-xona"]
+}
+
 async def fetch_html(url: str, data: dict = None) -> str:
     async with aiohttp.ClientSession() as session:
         try:
@@ -263,34 +270,35 @@ async def search_teacher_schedule(teacher_name: str) -> str:
         )
     return result
 
-async def get_empty_rooms(current_time: str) -> str:
+async def get_rooms_status_by_building(building_name: str, current_time: str) -> str:
     if _IS_CACHING and not _ALL_SCHEDULES_CACHE:
-        return "⏳ <i>Ma'lumotlar bazasi hozir yangilanmoqda. Iltimos, 1-2 daqiqadan so'ng qayta urinib ko'ring...</i>"
+        return "⏳ <i>Ma'lumotlar bazasi hozir yangilanmoqda. Iltimos, birozdan so'ng qayta urinib ko'ring...</i>"
         
     all_lessons = await _fetch_all_schedules()
     tz = timezone(timedelta(hours=5))
     today_str = datetime.now(tz).strftime("%d.%m.%Y")
     
-    occupied_rooms = set()
+    occupied_rooms = {}
+    
     for lsn in all_lessons:
         if today_str in lsn['sana']:
             if lsn['boshlanish_vaqti'] <= current_time <= lsn['tugash_vaqti']:
                 room = lsn['auditoriya'].strip()
-                if room: occupied_rooms.add(room)
+                if room: 
+                    occupied_rooms[room] = lsn['guruh_nomi']
                 
-    all_university_rooms = {
-        "101-xona (Bosh bino)", "102-xona (Bosh bino)", "103-xona (Bosh bino)",
-        "201-xona", "202-xona", "205-xona", "305-xona", "401-xona", "507-xona (Bosh bino)"
-    }
-    
-    empty_rooms = all_university_rooms - occupied_rooms
-    
-    if not empty_rooms:
-        return f"🏢 <b>Hozirgi vaqtda ({current_time}) barcha auditoriyalar band.</b>"
+    rooms = BUILDING_ROOMS.get(building_name, [])
+    if not rooms:
+        return "❌ <i>Bu bino/fakultet uchun xonalar ro'yxati kiritilmagan.</i>"
         
-    result = f"🚪 <b>Hozirgi vaqtda ({current_time}) bo'sh bo'lgan auditoriyalar:</b>\n\n"
-    for room in sorted(empty_rooms):
-        result += f"✅ {room}\n"
-        
+    result = f"🏢 <b>{building_name}</b> xonalari holati ({current_time}):\n\n"
+    
+    for room in sorted(rooms):
+        if room in occupied_rooms:
+            group_name = occupied_rooms[room]
+            result += f"❌ <b>{room}</b> — Band (<i>{group_name}</i>)\n"
+        else:
+            result += f"✅ <b>{room}</b> — Bo'sh\n"
+            
     result += "\n<i>*Izoh: Ro'yxat rasmiy jadval asosida shakllantirildi.</i>"
     return result
