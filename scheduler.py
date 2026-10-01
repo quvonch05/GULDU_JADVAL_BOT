@@ -3,14 +3,40 @@ import re
 from datetime import datetime, timedelta
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from aiogram import Bot
 
-from database import get_active_groups, get_users_by_group
+from database import get_active_groups, get_users_by_group, get_all_users_id, get_user_group
 from parser import get_schedule_text, search_group_id
 
 # Jadval o'zgarishlarini tekshirish uchun vaqtinchalik xotira
 _SCHEDULE_CACHE = {}
 
-async def check_schedules(bot):
+async def send_daily_briefing(bot: Bot):
+    """Har kuni ertalab soat 07:00 da foydalanuvchilarga bugungi jadvalni yuborish"""
+    users = await get_all_users_id()
+    
+    for user_id in users:
+        group_name = await get_user_group(user_id)
+        if group_name:
+            group_id = await search_group_id(group_name)
+            if group_id:
+                schedule_text = await get_schedule_text(group_id, group_name, "bugun")
+                
+                # Agar jadvalda "Dam olish kuni" yoki "dars topilmadi" yozuvi bo'lmasa, xabar yuboramiz
+                if "Dam olish kuni" not in schedule_text and "Bunday sanada dars topilmadi" not in schedule_text:
+                    msg_text = (
+                        f"🌅 <b>Xayrli tong! Bugungi dars jadvalingiz bilan tanishing:</b>\n\n"
+                        f"{schedule_text}\n\n"
+                        f"<i>🏃‍♂️ Darsga kechikmang, kuningiz unumli o'tsin!</i>"
+                    )
+                    try:
+                        await bot.send_message(chat_id=user_id, text=msg_text, parse_mode="HTML")
+                        await asyncio.sleep(0.05) # Spam himoyasi
+                    except Exception:
+                        pass
+
+async def check_schedules(bot: Bot):
+    """Jadval o'zgarishlarini tekshirish va 30 daqiqa oldin eslatma yuborish"""
     tz = pytz.timezone('Asia/Tashkent')
     now = datetime.now(tz)
     
@@ -27,7 +53,7 @@ async def check_schedules(bot):
         # Faqat bugungi jadvalni olamiz
         schedule_text = await get_schedule_text(group_id, group_name, "bugun")
         
-        if "Bunday sanada dars topilmadi" in schedule_text:
+        if "Bunday sanada dars topilmadi" in schedule_text or "Dam olish kuni" in schedule_text:
             continue
 
         # 1. O'ZGARISHLAR MONITORINGI
@@ -41,8 +67,7 @@ async def check_schedules(bot):
                     pass
         _SCHEDULE_CACHE[group_name] = schedule_text
 
-        # 2. 30 DAQIQALIK MUKAMMAL ESLATMA (Rasmdagi dizayn asosida)
-        # Jadvalni har bir dars bloklariga bo'lamiz
+        # 2. 30 DAQIQALIK MUKAMMAL ESLATMA
         blocks = schedule_text.split('\n\n')
         
         for block in blocks:
@@ -50,7 +75,6 @@ async def check_schedules(bot):
             time_match = re.search(r'\[(\d{2}:\d{2})\s*-', block)
             
             if time_match and time_match.group(1) == target_time_str:
-                # Agar vaqt mos kelsa, kerakli ma'lumotlarni matndan sug'urib olamiz
                 start_time = target_time_str
                 
                 juftlik_match = re.search(r'(\d+-juftlik)', block)
@@ -71,7 +95,6 @@ async def check_schedules(bot):
                 auditoriya_match = re.search(r'Auditoriya:\s*(.+)', block, re.IGNORECASE)
                 auditoriya = auditoriya_match.group(1).strip() if auditoriya_match else "Mavjud emas"
                 
-                # Eslatma dizayni
                 eslatma_matni = (
                     "⏰ <b>Dars boshlanishiga 30 daqiqa qoldi!</b>\n\n"
                     f"👥 <b>Guruh:</b> {group_name}\n"
@@ -82,7 +105,6 @@ async def check_schedules(bot):
                     "<i>Darsga kechikmang! Muvaffaqiyatli dars tilaymiz! ✨</i>"
                 )
                 
-                # Shu guruhdagi barcha talabalarga jo'natamiz
                 users = await get_users_by_group(group_name)
                 for uid in users:
                     try:
@@ -93,8 +115,14 @@ async def check_schedules(bot):
         # Telegram API ni zo'riqtirib qo'ymaslik uchun kichik pauza
         await asyncio.sleep(1)
 
-def start_scheduler(bot):
-    scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Tashkent'))
-    # Har 1 daqiqada tekshiruv ishga tushadi
+def start_scheduler(bot: Bot):
+    tz = pytz.timezone('Asia/Tashkent')
+    scheduler = AsyncIOScheduler(timezone=tz)
+    
+    # 1. Har kuni ertalab 07:00 da dayjest yuborish
+    scheduler.add_job(send_daily_briefing, trigger='cron', hour=7, minute=0, args=[bot])
+    
+    # 2. Har 1 daqiqada jadval o'zgarishi va darsga 30 daqiqa qolganini tekshirish
     scheduler.add_job(check_schedules, 'interval', minutes=1, args=[bot])
+    
     scheduler.start()
