@@ -15,7 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 from database import init_db, set_user_group, get_all_users_id, get_user_group, get_active_groups
 from parser import (
     get_faculties, get_forms, get_courses, get_groups, 
-    get_schedule_text, search_group_id, search_teacher_schedule, get_empty_rooms
+    get_schedule_text, search_group_id, search_teacher_schedule, get_rooms_status_by_building
 )
 from scheduler import start_scheduler
 
@@ -60,7 +60,7 @@ async def send_main_menu(message: Message, user_id: int, first_name: str, state:
         
     builder.button(text="🏛 Fakultetlar bo'yicha", callback_data="menu_faculties")
     builder.button(text="🎯 Guruhni qidirish", callback_data="menu_search")
-    builder.button(text="👨‍‍🏫 O'qituvchi jadvali", callback_data="menu_teacher_search")
+    builder.button(text="👨‍🏫 O'qituvchi jadvali", callback_data="menu_teacher_search")
     builder.button(text="🚪 Bo'sh auditoriyalar", callback_data="menu_empty_rooms")
     builder.button(text="ℹ️ Bot haqida", callback_data="menu_about")
     
@@ -99,7 +99,7 @@ async def show_my_group(call: CallbackQuery):
         builder.adjust(3, 1, 2)
         await wait_msg.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
     else:
-        await wait_msg.edit_text("❌ Guruh ma'lumotlari topilmadi.", reply_markup=InlineKeyboardBuilder().button(text="Orqaga", callback_data="menu_main").as_markup())
+        await wait_msg.edit_text("❌ Guruh ma'lumotlari topilmadi.", reply_markup=InlineKeyboardBuilder().button(text="🔙 Orqaga", callback_data="menu_main").as_markup())
 
 # --- O'QITUVCHI QIDIRISH ---
 @dp.callback_query(F.data == "menu_teacher_search")
@@ -128,18 +128,41 @@ async def process_teacher_search(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(), parse_mode="HTML"
         )
 
-# --- BO'SH XONALAR ---
+# --- BO'SH XONALAR (BINONI TANLASH) ---
 @dp.callback_query(F.data == "menu_empty_rooms")
-async def process_empty_rooms(call: CallbackQuery):
-    wait_msg = await call.message.edit_text("⏳ Hozirgi vaqt uchun bo'sh auditoriyalar tahlil qilinmoqda...")
+async def show_buildings_menu(call: CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    
+    builder.button(text="🏢 Bosh bino", callback_data="bld_Bosh bino")
+    builder.button(text="🧮 Fizika-Matematika", callback_data="bld_Fizika-Matematika")
+    builder.button(text="🧬 Tabiiy fanlar", callback_data="bld_Tabiiy fanlar")
+    builder.button(text="🔙 Asosiy menyu", callback_data="menu_main")
+    
+    builder.adjust(1, 1, 1, 1)
+    
+    await call.message.edit_text(
+        "🏢 <b>Qaysi bino yoki fakultet xonalarini tekshirmoqchisiz?</b>\n\nQuyidagilardan birini tanlang:", 
+        reply_markup=builder.as_markup(), 
+        parse_mode="HTML"
+    )
+
+# --- TANLANGAN BINO XONALARINI KO'RSATISH ---
+@dp.callback_query(F.data.startswith("bld_"))
+async def process_building_rooms(call: CallbackQuery):
+    building_name = call.data.split("_")[1]
+    wait_msg = await call.message.edit_text(f"⏳ <b>{building_name}</b> xonalari tahlil qilinmoqda...", parse_mode="HTML")
+    
     tz = pytz.timezone('Asia/Tashkent')
     current_time = datetime.now(tz).strftime("%H:%M")
     
-    rooms_text = await get_empty_rooms(current_time)
+    rooms_text = await get_rooms_status_by_building(building_name, current_time)
+    
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔄 Yangilash", callback_data="menu_empty_rooms")
-    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
-    builder.adjust(1, 1)
+    builder.button(text="🔄 Yangilash", callback_data=f"bld_{building_name}")
+    builder.button(text="🔙 Binolar ro'yxati", callback_data="menu_empty_rooms")
+    builder.button(text="🏠 Asosiy menyu", callback_data="menu_main")
+    
+    builder.adjust(1, 2)
     
     await wait_msg.edit_text(rooms_text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
@@ -148,14 +171,14 @@ async def process_empty_rooms(call: CallbackQuery):
 async def menu_about(call: CallbackQuery):
     text = "🤖 <b>GulDU Dars Jadvali Bot</b>\n\nBu bot orqali universitetdagi barcha jadvallar, o'qituvchilar va bo'sh xonalarni kuzatib borishingiz mumkin."
     builder = InlineKeyboardBuilder()
-    builder.button(text="👨‍‍🏫 Asosiy menyu", callback_data="menu_main")
+    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "menu_search")
 async def menu_search(call: CallbackQuery, state: FSMContext):
     text = "🔍 <b>Guruh nomini yozib yuboring</b>\n\n(Masalan: <i>10-26AT</i>, <i>9-24AT</i>):"
     builder = InlineKeyboardBuilder()
-    builder.button(text="👨‍‍🏫 Asosiy menyu", callback_data="menu_main")
+    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await state.set_state(QidiruvHolati.guruh_kutilmoqda)
 
@@ -372,7 +395,7 @@ async def boshqa_xabarlar(message: Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state == AdminStates.waiting_for_broadcast.state:
         return
-    await message.reply("🙂 Iltimos, kerakli amallarni bajarish uchun /start buyrug'idan foydalaning.")
+    await message.reply("🙂 Iltimos, kerakli amallarni bajarish uchun /start buyrug'idan foydalaning yoki tugmalarni bosing.")
 
 
 # ======================================================================
