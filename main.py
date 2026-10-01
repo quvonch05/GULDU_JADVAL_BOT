@@ -19,7 +19,7 @@ from parser import (
 )
 from scheduler import start_scheduler
 
-BOT_TOKEN = "8923062582:AAG5vTUre0w4l5Ih2qq9rl9z-lseBVewT_0"
+BOT_TOKEN = "8923062582:AAF8Vl3F0wTufeF3uZ8XEFbrpvu21XUbQy4"
 ADMIN_IDS = [1686406789] 
 
 bot = Bot(token=BOT_TOKEN)
