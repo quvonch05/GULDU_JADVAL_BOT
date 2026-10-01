@@ -169,7 +169,19 @@ async def process_building_rooms(call: CallbackQuery):
 # --- QOLGAN MENYU TUGMALARI ---
 @dp.callback_query(F.data == "menu_about")
 async def menu_about(call: CallbackQuery):
-    text = "🤖 <b>GulDU Dars Jadvali Bot</b>\n\nBu bot orqali universitetdagi barcha jadvallar, o'qituvchilar va bo'sh xonalarni kuzatib borishingiz mumkin."
+    text = (
+        "🤖 <b>GulDU Dars Jadvali Bot — Qo'llanma</b>\n\n"
+        "Ushbu bot Guliston Davlat Universiteti talabalari va ustozlari uchun dars jadvallarini kuzatishni eng qulay darajaga olib chiqish maqsadida yaratilgan.\n\n"
+        "<b>Asosiy imkoniyatlar:</b>\n"
+        "🎯 <b>Guruhni qidirish:</b> Eng tezkor usul. Guruh nomini (masalan: <i>9-24AT</i>) yozib yuboring va jadvalni lahzada oling.\n"
+        "🏛 <b>Fakultetlar bo'yicha:</b> Agar guruh nomini aniq bilmasangiz, fakultet, kurs va ta'lim shaklini tanlash orqali bosqichma-bosqich qidirishingiz mumkin.\n"
+        "👨‍🏫 <b>O'qituvchi jadvali:</b> Ustozingiz qachon, qaysi guruhga va qayerda dars o'tayotganini bilmoqchimisiz? Shunchaki ism-sharifini yozib qidiring.\n"
+        "🚪 <b>Bo'sh auditoriyalar:</b> Darsingiz bo'lmagan vaqtda qayerda dars tayyorlashni bilmayapsizmi? Bino nomini tanlang va ayni shu daqiqada qaysi xonalar bo'sh ekanligini, bandlarida esa qaysi guruh o'tirganini ko'ring.\n\n"
+        "⭐ <b>Maxsus Imkoniyat (Mening guruhim)</b>\n"
+        "O'z guruhingizni topgach, pastdagi <i>«📌 Asosiy guruh qilib saqlash»</i> tugmasini bosing. Shundan so'ng, Asosiy menyuda siz uchun maxsus tezkor tugma paydo bo'ladi. Dars boshlanishiga 30 daqiqa qolganda va jadvalda o'zgarish bo'lsa, bot sizga avtomatik eslatma yuboradi!\n\n"
+        "<i>Eslatma: Barcha ma'lumotlar to'g'ridan-to'g'ri GulDU rasmiy bazasidan (data.guldu.uz) olinadi.</i>\n\n"
+        "👨‍💻 <b>Dasturchi:</b> Quvonchbek Baratov"
+    )
     builder = InlineKeyboardBuilder()
     builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
