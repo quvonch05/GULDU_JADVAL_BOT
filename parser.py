@@ -9,7 +9,7 @@ _CACHED_GROUPS = {}
 
 _ALL_SCHEDULES_CACHE = []
 _LAST_CACHE_TIME = None
-_IS_CACHING = False # Jarayon ketayotganini kuzatuvchi flag
+_IS_CACHING = False 
 
 async def fetch_html(url: str, data: dict = None) -> str:
     async with aiohttp.ClientSession() as session:
@@ -99,13 +99,20 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
     today_str = today_dt.strftime("%d.%m.%Y")
     tomorrow_str = tomorrow_dt.strftime("%d.%m.%Y")
 
+    uz_days = {0: 'Dushanba', 1: 'Seshanba', 2: 'Chorshanba', 3: 'Payshanba', 4: 'Juma', 5: 'Shanba', 6: 'Yakshanba'}
+
     soup = BeautifulSoup(html, 'html.parser')
     
-    header_title = "To'liq haftalik dars jadvali"
-    if day_filter == "bugun": header_title = "Bugungi dars jadvali"
-    if day_filter == "ertaga": header_title = "Ertangi dars jadvali"
+    if day_filter == "bugun": 
+        day_name = uz_days[today_dt.weekday()]
+        header_title = f"Bugungi darslar — {today_str} ({day_name})"
+    elif day_filter == "ertaga": 
+        day_name = uz_days[tomorrow_dt.weekday()]
+        header_title = f"Ertangi darslar — {tomorrow_str} ({day_name})"
+    else:
+        header_title = "To'liq haftalik dars jadvali"
     
-    result_text = f"👥 Guruh: <a href='https://data.guldu.uz'><b>{group_name}</b></a>\n📘 {header_title}\n\n"
+    result_text = f"👥 Guruh: <a href='https://data.guldu.uz'><b>{group_name}</b></a>\n📆 {header_title}\n\n"
     found_days = 0
 
     cols = soup.find_all('div', class_='col-md-12')
@@ -145,10 +152,13 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
                 result_text += f"🏫 Auditoriya: {room}\n\n"
 
     if found_days == 0:
-        result_text += f"Bunday sanada dars topilmadi 😴"
+        if day_filter in ["bugun", "ertaga"]:
+            prefix = "Bugun" if day_filter == "bugun" else "Ertaga"
+            result_text += f"🌴 <i>{prefix} darslar mavjud emas (Dam olish kuni).</i>"
+        else:
+            result_text += f"Bunday sanada dars topilmadi 😴"
 
     return result_text.strip()
-
 
 # =====================================================================
 # QOTIB QOLISHNI OLDINI OLUVCHI XAVFSIZ KESHLASH LOGIKASI
@@ -171,7 +181,6 @@ async def _fetch_all_schedules():
     if not _CACHED_GROUPS:
         await search_group_id("DUMMY_LOAD")
         
-    # Serverni qotirmaslik uchun bir vaqtning o'zida faqat 5 ta fayl yuklanadi
     sem = asyncio.Semaphore(5) 
     
     async def fetch_group(gname, gid, session):
@@ -218,7 +227,6 @@ async def _fetch_all_schedules():
             except Exception:
                 pass
 
-    # Yagona xavfsiz ulanish (Tez ishlaydi va bloklanmaydi)
     timeout = aiohttp.ClientTimeout(total=60)
     async with aiohttp.ClientSession(timeout=timeout) as main_session:
         tasks = [fetch_group(gname, gid, main_session) for gname, gid in _CACHED_GROUPS.items()]
