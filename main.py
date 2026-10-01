@@ -2,8 +2,10 @@ import asyncio
 import logging
 import os
 from aiohttp import web
+from datetime import datetime
+import pytz
 
-from aiogram import Bot, Dispatcher, F, types
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -11,7 +13,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from database import init_db, set_user_group, get_all_users_id, get_user_group
-from parser import get_faculties, get_forms, get_courses, get_groups, get_schedule_text, search_group_id
+from parser import (
+    get_faculties, get_forms, get_courses, get_groups, 
+    get_schedule_text, search_group_id, search_teacher_schedule, get_empty_rooms
+)
 from scheduler import start_scheduler
 
 BOT_TOKEN = "8923062582:AAGcjkBTD714VDE0cSWEs_XYPL2PSIOHegI"
@@ -26,9 +31,9 @@ class AdminStates(StatesGroup):
 
 class QidiruvHolati(StatesGroup):
     guruh_kutilmoqda = State()
+    oqituvchi_kutilmoqda = State()
 
-
-# --- ASOSIY MENYU CHIZUVCHI YORDAMCHI FUNKSIYA ---
+# --- ASOSIY MENYU CHIZUVCHI FUNKSIYA ---
 async def send_main_menu(message: Message, user_id: int, first_name: str, state: FSMContext):
     await state.clear() 
     saved_group = await get_user_group(user_id)
@@ -55,15 +60,16 @@ async def send_main_menu(message: Message, user_id: int, first_name: str, state:
         
     builder.button(text="🏛 Fakultetlar bo'yicha", callback_data="menu_faculties")
     builder.button(text="🎯 Guruhni qidirish", callback_data="menu_search")
+    builder.button(text="👨‍🏫 O'qituvchi jadvali", callback_data="menu_teacher_search")
+    builder.button(text="🚪 Bo'sh auditoriyalar", callback_data="menu_empty_rooms")
     builder.button(text="ℹ️ Bot haqida", callback_data="menu_about")
     
     if saved_group:
-        builder.adjust(1, 2, 1)
+        builder.adjust(1, 2, 2, 1)
     else:
-        builder.adjust(2, 1)
+        builder.adjust(2, 2, 1)
     
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-
 
 # --- START BUYRUG'I ---
 @dp.message(CommandStart())
@@ -72,9 +78,7 @@ async def cmd_start(message: Message, state: FSMContext):
         await message.answer_sticker("CAACAgIAAxkBAAEK1eJlY_6K3F2Gv0yqQj6wA_J5cM9_AAO_AQAC7_L0CwVj5-VlRkY6MzQE")
     except Exception:
         pass 
-        
     await send_main_menu(message, message.from_user.id, message.from_user.first_name, state)
-
 
 # --- MENING GURUHIM TUGMASI ---
 @dp.callback_query(F.data.startswith("mygrp_"))
@@ -95,51 +99,59 @@ async def show_my_group(call: CallbackQuery):
     else:
         await wait_msg.edit_text("❌ Guruh ma'lumotlari topilmadi.", reply_markup=InlineKeyboardBuilder().button(text="Orqaga", callback_data="menu_main").as_markup())
 
-
-# --- ADMIN PANEL ---
-@dp.message(Command("admin"))
-async def admin_panel(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    users = await get_all_users_id()
+# --- YANGI: O'QITUVCHI QIDIRISH ---
+@dp.callback_query(F.data == "menu_teacher_search")
+async def menu_teacher_search(call: CallbackQuery, state: FSMContext):
+    text = "👨‍🏫 <b>O'qituvchi ism-sharifini kiriting</b>\n\n(Masalan: <i>ISMATILLAYEV A.</i> yoki qisman familiyasini):"
     builder = InlineKeyboardBuilder()
-    builder.button(text="📢 Barchaga xabar yuborish", callback_data="admin_broadcast")
-    await message.answer(f"👨‍💻 <b>Boshqaruv Paneli</b>\n\n👥 Botdagi jami talabalar: <b>{len(users)} ta</b>", reply_markup=builder.as_markup(), parse_mode="HTML")
+    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await state.set_state(QidiruvHolati.oqituvchi_kutilmoqda)
 
-@dp.callback_query(F.data == "admin_broadcast")
-async def ask_broadcast_msg(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
-        return
-    await call.message.edit_text("✍️ Tarqatmoqchi bo'lgan xabaringizni yuboring (Matn, rasm yoki video):")
-    await state.set_state(AdminStates.waiting_for_broadcast)
+@dp.message(QidiruvHolati.oqituvchi_kutilmoqda)
+async def process_teacher_search(message: Message, state: FSMContext):
+    teacher_name = message.text.strip()
+    wait_msg = await message.answer(f"⏳ <b>{teacher_name}</b> ismli o'qituvchi jadvali qidirilmoqda, kuting...")
+    
+    schedule_text = await search_teacher_schedule(teacher_name)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+    
+    if schedule_text:
+        await wait_msg.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        await state.clear()
+    else:
+        await wait_msg.edit_text(
+            f"❌ <b>{teacher_name}</b> ismli o'qituvchi topilmadi yoki uning darslari yo'q.\nIltimos, ism-sharifni to'g'ri kiriting.", 
+            reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
 
-@dp.message(AdminStates.waiting_for_broadcast)
-async def send_broadcast(message: Message, state: FSMContext):
-    users = await get_all_users_id()
-    sent_count = 0
-    await message.answer("⏳ Xabar tarqatilmoqda...")
-    for uid in users:
-        try:
-            await message.send_copy(chat_id=uid)
-            sent_count += 1
-            await asyncio.sleep(0.05) 
-        except Exception:
-            pass
-    await message.answer(f"✅ Xabar <b>{sent_count}</b> ta foydalanuvchiga muvaffaqiyatli yuborildi!", parse_mode="HTML")
-    await state.clear()
+# --- YANGI: BO'SH XONALAR ---
+@dp.callback_query(F.data == "menu_empty_rooms")
+async def process_empty_rooms(call: CallbackQuery):
+    wait_msg = await call.message.edit_text("⏳ Hozirgi vaqt uchun bo'sh auditoriyalar tahlil qilinmoqda...")
+    tz = pytz.timezone('Asia/Tashkent')
+    current_time = datetime.now(tz).strftime("%H:%M")
+    
+    rooms_text = await get_empty_rooms(current_time)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Yangilash", callback_data="menu_empty_rooms")
+    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+    builder.adjust(1, 1)
+    
+    await wait_msg.edit_text(rooms_text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-
-# --- ASOSIY MENYU TUGMALARI ---
+# --- QOLGAN MENYU TUGMALARI ---
 @dp.callback_query(F.data == "menu_about")
 async def menu_about(call: CallbackQuery):
-    text = "🤖 <b>GulDU Dars Jadvali Bot</b>\n\nBu bot orqali universitetdagi barcha dars jadvallarini qulay kuzatib borishingiz mumkin. \n\n✨ <i>Qo'shimcha imkoniyatlar:</i> Jadvaldagi o'zgarishlar va dars boshlanishidan 30 daqiqa oldin keladigan avto-eslatmalar."
+    text = "🤖 <b>GulDU Dars Jadvali Bot</b>\n\nBu bot orqali universitetdagi barcha jadvallar, o'qituvchilar va bo'sh xonalarni kuzatib borishingiz mumkin."
     builder = InlineKeyboardBuilder()
     builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "menu_search")
 async def menu_search(call: CallbackQuery, state: FSMContext):
-    text = "🔍 <b>Guruh nomini yozib yuboring</b>\n\n(Masalan: <i>10-26AT</i>, <i>9-24AT</i> yoki <i>1-24F</i>):"
+    text = "🔍 <b>Guruh nomini yozib yuboring</b>\n\n(Masalan: <i>10-26AT</i>, <i>9-24AT</i>):"
     builder = InlineKeyboardBuilder()
     builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -149,7 +161,6 @@ async def menu_search(call: CallbackQuery, state: FSMContext):
 async def back_to_main(call: CallbackQuery, state: FSMContext):
     await call.message.delete()
     await send_main_menu(call.message, call.from_user.id, call.from_user.first_name, state)
-
 
 # --- FAKULTET -> SHAKL -> KURS -> GURUH ---
 @dp.callback_query(F.data == "menu_faculties")
@@ -185,7 +196,7 @@ async def show_courses(call: CallbackQuery):
     for kid, name in courses.items():
         builder.button(text=f"📘 {name}", callback_data=f"crs_{fakul_id}_{t_shakli_id}_{kid}")
     builder.button(text="🔙 Ta'lim shakllari", callback_data=f"fac_{fakul_id}")
-    builder.button(text="👨‍‍🏫 Bosh menyu", callback_data="menu_main")
+    builder.button(text="👨‍🏫 Bosh menyu", callback_data="menu_main")
     builder.adjust(2, 2)
     await call.message.edit_text("📘 Kursni tanlang:", reply_markup=builder.as_markup())
 
@@ -201,7 +212,6 @@ async def show_groups(call: CallbackQuery):
     builder.button(text="👨‍🏫 Bosh menyu", callback_data="menu_main")
     builder.adjust(2)
     await call.message.edit_text("👥 Guruhni tanlang:", reply_markup=builder.as_markup())
-
 
 # --- DARS JADVALINI KO'RSATISH VA SAQLASH ---
 @dp.callback_query(F.data.startswith("grp_"))
@@ -230,21 +240,18 @@ async def save_group(call: CallbackQuery, state: FSMContext):
     group_name = call.data.split("_")[1]
     await set_user_group(call.from_user.id, group_name)
     await call.answer(f"✅ {group_name} guruhi avto-eslatmalar uchun saqlandi!", show_alert=True)
-    
     await call.message.delete()
     await send_main_menu(call.message, call.from_user.id, call.from_user.first_name, state)
 
-
-# --- MATN ORQALI QIDIRISH (FSM KUTISH REJIMI) ---
+# --- MATN ORQALI GURUH QIDIRISH (FSM) ---
 @dp.message(QidiruvHolati.guruh_kutilmoqda)
-async def process_text_search(message: Message, state: FSMContext):
+async def process_group_search(message: Message, state: FSMContext):
     matn = message.text.strip().upper()
-    
     if "-" not in matn or len(matn) < 4:
-        await message.reply("Guruh formatida xatolik bor. Yana urinib ko'ring (masalan: 10-26AT):")
+        await message.reply("Guruh formatida xatolik bor (masalan: 10-26AT):")
         return
 
-    wait_msg = await message.answer("⏳ Guruh bazadan qidirilmoqda, 5-10 soniya kuting...")
+    wait_msg = await message.answer("⏳ Guruh bazadan qidirilmoqda, kuting...")
     group_id = await search_group_id(matn)
     
     if group_id:
@@ -256,13 +263,11 @@ async def process_text_search(message: Message, state: FSMContext):
         builder.button(text="📌 Mening guruhim qilib saqlash", callback_data=f"save_{matn}")
         builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
         builder.adjust(3, 1, 1)
-        
         await wait_msg.delete()
         await message.answer(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
         await state.clear()
     else:
-        await wait_msg.edit_text("❌ Bunday guruh topilmadi. To'g'ri yozilganiga ishonch hosil qiling (masalan: 10-26AT).")
-
+        await wait_msg.edit_text("❌ Bunday guruh topilmadi.")
 
 # --- TASODIFIY XABARLAR UCHUN ---
 @dp.message()
@@ -272,6 +277,37 @@ async def boshqa_xabarlar(message: Message, state: FSMContext):
         return
     await message.reply("Iltimos, kerakli amallarni bajarish uchun pastdagi menyu tugmalaridan foydalaning.")
 
+# --- ADMIN PANEL ---
+@dp.message(Command("admin"))
+async def admin_panel(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    users = await get_all_users_id()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📢 Barchaga xabar yuborish", callback_data="admin_broadcast")
+    await message.answer(f"👨‍💻 <b>Boshqaruv Paneli</b>\n\n👥 Jami: <b>{len(users)} ta</b>", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+@dp.callback_query(F.data == "admin_broadcast")
+async def ask_broadcast_msg(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.message.edit_text("✍️ Tarqatmoqchi bo'lgan xabaringizni yuboring:")
+    await state.set_state(AdminStates.waiting_for_broadcast)
+
+@dp.message(AdminStates.waiting_for_broadcast)
+async def send_broadcast(message: Message, state: FSMContext):
+    users = await get_all_users_id()
+    sent_count = 0
+    await message.answer("⏳ Xabar tarqatilmoqda...")
+    for uid in users:
+        try:
+            await message.send_copy(chat_id=uid)
+            sent_count += 1
+            await asyncio.sleep(0.05) 
+        except Exception:
+            pass
+    await message.answer(f"✅ Xabar <b>{sent_count}</b> kishiga yuborildi!", parse_mode="HTML")
+    await state.clear()
 
 # --- SOXTA VEB-SERVER VA ISHGA TUSHIRISH ---
 async def handle_ping(request):
@@ -280,9 +316,7 @@ async def handle_ping(request):
 async def main():
     logging.basicConfig(level=logging.INFO)
     await init_db()
-    
     start_scheduler(bot)
-    print("Avto-eslatma tizimi yoqildi.")
     
     app = web.Application()
     app.router.add_get('/', handle_ping)
@@ -290,9 +324,7 @@ async def main():
     await runner.setup()
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port) 
-    
     await site.start()
-    print(f"Soxta veb-server {port}-portda ishga tushdi.")
 
     await dp.start_polling(bot)
 
