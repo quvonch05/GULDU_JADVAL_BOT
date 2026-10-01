@@ -12,7 +12,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-# Tepadagi importga get_active_groups ham qo'shildi
 from database import init_db, set_user_group, get_all_users_id, get_user_group, get_active_groups
 from parser import (
     get_faculties, get_forms, get_courses, get_groups, 
@@ -21,8 +20,6 @@ from parser import (
 from scheduler import start_scheduler
 
 BOT_TOKEN = "8923062582:AAG5vTUre0w4l5Ih2qq9rl9z-lseBVewT_0"
-
-# Adminlar ro'yxati (shu yerdan nazorat qilasiz)
 ADMIN_IDS = [1686406789] 
 
 bot = Bot(token=BOT_TOKEN)
@@ -63,7 +60,7 @@ async def send_main_menu(message: Message, user_id: int, first_name: str, state:
         
     builder.button(text="🏛 Fakultetlar bo'yicha", callback_data="menu_faculties")
     builder.button(text="🎯 Guruhni qidirish", callback_data="menu_search")
-    builder.button(text="👨‍🏫 O'qituvchi jadvali", callback_data="menu_teacher_search")
+    builder.button(text="👨‍‍🏫 O'qituvchi jadvali", callback_data="menu_teacher_search")
     builder.button(text="🚪 Bo'sh auditoriyalar", callback_data="menu_empty_rooms")
     builder.button(text="ℹ️ Bot haqida", callback_data="menu_about")
     
@@ -93,16 +90,18 @@ async def show_my_group(call: CallbackQuery):
     if group_id:
         schedule_text = await get_schedule_text(group_id, group_name, "bugun") 
         builder = InlineKeyboardBuilder()
-        builder.button(text="📅 Bugun", callback_data=f"grp_{group_id}_{group_name}_bugun")
+        builder.button(text="✅ Bugun", callback_data=f"grp_{group_id}_{group_name}_bugun")
         builder.button(text="⏰ Ertaga", callback_data=f"grp_{group_id}_{group_name}_ertaga")
-        builder.button(text="🟢 Haftalik", callback_data=f"grp_{group_id}_{group_name}_haftalik")
+        builder.button(text="📚 Haftalik", callback_data=f"grp_{group_id}_{group_name}_haftalik")
+        builder.button(text="📌 Asosiy guruh qilib saqlash", callback_data=f"save_{group_name}")
+        builder.button(text="🔍 Boshqa guruh", callback_data="menu_search")
         builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
-        builder.adjust(3, 1)
+        builder.adjust(3, 1, 2)
         await wait_msg.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
     else:
         await wait_msg.edit_text("❌ Guruh ma'lumotlari topilmadi.", reply_markup=InlineKeyboardBuilder().button(text="Orqaga", callback_data="menu_main").as_markup())
 
-# --- YANGI: O'QITUVCHI QIDIRISH ---
+# --- O'QITUVCHI QIDIRISH ---
 @dp.callback_query(F.data == "menu_teacher_search")
 async def menu_teacher_search(call: CallbackQuery, state: FSMContext):
     text = "👨‍🏫 <b>O'qituvchi ism-sharifini kiriting</b>\n\n(Masalan: <i>ISMATILLAYEV A.</i> yoki qisman familiyasini):"
@@ -129,7 +128,7 @@ async def process_teacher_search(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(), parse_mode="HTML"
         )
 
-# --- YANGI: BO'SH XONALAR ---
+# --- BO'SH XONALAR ---
 @dp.callback_query(F.data == "menu_empty_rooms")
 async def process_empty_rooms(call: CallbackQuery):
     wait_msg = await call.message.edit_text("⏳ Hozirgi vaqt uchun bo'sh auditoriyalar tahlil qilinmoqda...")
@@ -149,14 +148,14 @@ async def process_empty_rooms(call: CallbackQuery):
 async def menu_about(call: CallbackQuery):
     text = "🤖 <b>GulDU Dars Jadvali Bot</b>\n\nBu bot orqali universitetdagi barcha jadvallar, o'qituvchilar va bo'sh xonalarni kuzatib borishingiz mumkin."
     builder = InlineKeyboardBuilder()
-    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+    builder.button(text="👨‍‍🏫 Asosiy menyu", callback_data="menu_main")
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "menu_search")
 async def menu_search(call: CallbackQuery, state: FSMContext):
     text = "🔍 <b>Guruh nomini yozib yuboring</b>\n\n(Masalan: <i>10-26AT</i>, <i>9-24AT</i>):"
     builder = InlineKeyboardBuilder()
-    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+    builder.button(text="👨‍‍🏫 Asosiy menyu", callback_data="menu_main")
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await state.set_state(QidiruvHolati.guruh_kutilmoqda)
 
@@ -224,15 +223,15 @@ async def show_schedule(call: CallbackQuery):
     group_name = data_parts[2]
     day_filter = data_parts[3] 
     
-    await call.message.edit_text(f"🔍 <b>{group_name}</b> jadvali yuklanmoqda...", parse_mode="HTML")
+    await call.message.edit_text(f"⏳ <b>{group_name}</b> jadvali yuklanmoqda...", parse_mode="HTML")
     schedule_text = await get_schedule_text(group_id, group_name, day_filter)
     
     builder = InlineKeyboardBuilder()
-    builder.button(text="📅 Bugun", callback_data=f"grp_{group_id}_{group_name}_bugun")
+    builder.button(text="✅ Bugun", callback_data=f"grp_{group_id}_{group_name}_bugun")
     builder.button(text="⏰ Ertaga", callback_data=f"grp_{group_id}_{group_name}_ertaga")
-    builder.button(text="🟢 Haftalik", callback_data=f"grp_{group_id}_{group_name}_haftalik")
-    builder.button(text="📌 Mening guruhim qilib saqlash", callback_data=f"save_{group_name}")
-    builder.button(text="🔙 Boshqa guruh", callback_data="menu_faculties")
+    builder.button(text="📚 Haftalik", callback_data=f"grp_{group_id}_{group_name}_haftalik")
+    builder.button(text="📌 Asosiy guruh qilib saqlash", callback_data=f"save_{group_name}")
+    builder.button(text="🔍 Boshqa guruh", callback_data="menu_search")
     builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
     builder.adjust(3, 1, 2)
     
@@ -260,12 +259,13 @@ async def process_group_search(message: Message, state: FSMContext):
     if group_id:
         schedule_text = await get_schedule_text(group_id, matn, "haftalik")
         builder = InlineKeyboardBuilder()
-        builder.button(text="📅 Bugun", callback_data=f"grp_{group_id}_{matn}_bugun")
+        builder.button(text="✅ Bugun", callback_data=f"grp_{group_id}_{matn}_bugun")
         builder.button(text="⏰ Ertaga", callback_data=f"grp_{group_id}_{matn}_ertaga")
-        builder.button(text="🟢 Haftalik", callback_data=f"grp_{group_id}_{matn}_haftalik")
-        builder.button(text="📌 Mening guruhim qilib saqlash", callback_data=f"save_{matn}")
+        builder.button(text="📚 Haftalik", callback_data=f"grp_{group_id}_{matn}_haftalik")
+        builder.button(text="📌 Asosiy guruh qilib saqlash", callback_data=f"save_{matn}")
+        builder.button(text="🔍 Boshqa guruh", callback_data="menu_search")
         builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
-        builder.adjust(3, 1, 1)
+        builder.adjust(3, 1, 2)
         await wait_msg.delete()
         await message.answer(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
         await state.clear()
@@ -273,7 +273,7 @@ async def process_group_search(message: Message, state: FSMContext):
         await wait_msg.edit_text("❌ Bunday guruh topilmadi.")
 
 # ======================================================================
-# --- ADMIN PANEL FUNKSIYALARI (HAMMASI BIR JOYDA) ---
+# --- ADMIN PANEL FUNKSIYALARI ---
 # ======================================================================
 async def show_admin_menu(message_or_call):
     text = "👨‍💻 <b>Boshqaruv Paneli</b>\n\nTizim to'liq sizning nazoratingizda. Kerakli amalni tanlang:"
@@ -293,7 +293,7 @@ async def show_admin_menu(message_or_call):
 async def admin_panel(message: Message, state: FSMContext):
     if message.from_user.id not in ADMIN_IDS:
         return
-    await state.clear() # Har qanday qotib qolgan kutish rejimini tozalaydi
+    await state.clear() 
     await show_admin_menu(message)
 
 @dp.callback_query(F.data == "admin_stats")
@@ -317,8 +317,8 @@ async def admin_refresh(call: CallbackQuery):
     await call.answer("⏳ Bazadan yangi jadvallar yuklanmoqda...", show_alert=False)
     
     import parser
-    parser._LAST_CACHE_TIME = None # Kesh vaqtini nolga tushiramiz
-    await parser._fetch_all_schedules() # Bazani majburiy yangilaymiz
+    parser._LAST_CACHE_TIME = None 
+    await parser._fetch_all_schedules() 
     
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Orqaga", callback_data="admin_back")
@@ -344,7 +344,7 @@ async def send_broadcast(message: Message, state: FSMContext):
         try:
             await message.send_copy(chat_id=uid)
             sent_count += 1
-            await asyncio.sleep(0.05) # Telegram blokiga tushmaslik uchun
+            await asyncio.sleep(0.05)
         except Exception:
             pass
             
@@ -386,7 +386,6 @@ async def main():
     await init_db()
     start_scheduler(bot)
     
-    # YANGI QO'SHILGAN QISMI: Bot yonganda jadvallarni orqa fonda sekin yuklashni boshlaydi
     from parser import _fetch_all_schedules
     asyncio.create_task(_fetch_all_schedules())
     
