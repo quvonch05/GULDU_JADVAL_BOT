@@ -173,7 +173,7 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
                 
                 result_text += f"⏰ {time_text} • {s_type_emoji} [{s_type}]\n"
                 result_text += f"📖 Fan: {s_name}\n"
-                result_text += f"👨‍‍🏫 O'qituvchi: {teacher}\n"
+                result_text += f"👨‍🏫 O'qituvchi: {teacher}\n"
                 result_text += f"🏫 Auditoriya: {room}\n\n"
 
     if found_days == 0:
@@ -197,7 +197,10 @@ async def _fetch_all_schedules():
     tz = timezone(timedelta(hours=5))
     now = datetime.now(tz)
     
-    if _LAST_CACHE_TIME and (now - _LAST_CACHE_TIME).total_seconds() < 600 and _ALL_SCHEDULES_CACHE:
+    # MUHIM O'ZGARISH: Foydalanuvchilar kutib qolmasligi uchun vaqt limiti (600s) olib tashlandi.
+    # Agar xotirada ma'lumot bor bo'lsa, uni doim darhol qaytaradi.
+    # Baza faqat administrator yangilaganda yoki fon rejimida (scheduler) yangilanadi.
+    if _ALL_SCHEDULES_CACHE:
         return _ALL_SCHEDULES_CACHE
         
     _IS_CACHING = True
@@ -207,13 +210,13 @@ async def _fetch_all_schedules():
         if not _CACHED_GROUPS:
             await search_group_id("DUMMY_LOAD")
             
-        # O'ZGARISH: Sayt qotib qolmasligi uchun bir vaqtda faqat 2 ta guruhni tekshiramiz
+        # Sayt qotib qolmasligi uchun bir vaqtda faqat 2 ta guruhni tekshiramiz
         sem = asyncio.Semaphore(2) 
         
         async def fetch_group(gname, gid, session):
             faculty_name = _GROUP_FACULTY_MAP.get(gname.upper(), "Boshqa")
             async with sem:
-                # O'ZGARISH: Har bir guruh orasiga 0.3 soniya sekinlashtirish qo'shildi
+                # Har bir guruh orasiga 0.3 soniya sekinlashtirish qo'shildi
                 await asyncio.sleep(0.3)
                 try:
                     async with session.post(f"{BASE_URL}/ll.php", data={"datagroupid": str(gid)}) as resp:
