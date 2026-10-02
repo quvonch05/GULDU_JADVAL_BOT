@@ -233,7 +233,6 @@ async def _fetch_all_schedules():
                                 time_th = table.find('th')
                                 time_text = " ".join(time_th.text.split()) if time_th else ""
                                 
-                                # Vaqtni xatosiz va to'g'ri raqamli formatda olish uchun o'zgarish kiritildi (masalan, 8:30 ni 08:30 ga aylantiradi)
                                 times = re.findall(r'\d{1,2}:\d{2}', time_text)
                                 if len(times) > 0:
                                     st_parts = times[0].split(":")
@@ -277,7 +276,6 @@ async def _fetch_all_schedules():
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as main_session:
             tasks = [fetch_group(gname, gid, main_session) for gname, gid in _CACHED_GROUPS.items()]
-            # Agar 1 ta guruh tortishda xato bersa ham qolganlari to'xtab qolmaydi
             await asyncio.gather(*tasks, return_exceptions=True) 
         
         if temp_cache:
@@ -285,7 +283,6 @@ async def _fetch_all_schedules():
             _LAST_CACHE_TIME = now
             
     finally:
-        # Tizim qotib qolsa ham baribir qulfni avtomatik ochib yuboradi
         _IS_CACHING = False 
         
     return _ALL_SCHEDULES_CACHE
@@ -320,7 +317,6 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = Non
         
     all_lessons = await _fetch_all_schedules()
     
-    # MUHIM O'ZGARISH: Tashqaridan berilgan vaqtga qaramaydi, o'zi AYNAN HOZIRGI aniq vaqtni jonli hisoblab oladi
     tz = timezone(timedelta(hours=5))
     now_dt = datetime.now(tz)
     today_str = now_dt.strftime("%d.%m.%Y")
@@ -337,7 +333,6 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = Non
             faculty_all_rooms.add(room)
             
         if today_str in lsn['sana']:
-            # Bot vaqtni hisoblashda endi eski emas, jonli real_current_time dan foydalanadi
             if lsn['boshlanish_vaqti'] <= real_current_time <= lsn['tugash_vaqti']:
                 occupied_rooms[room] = lsn['guruh_nomi']
                 
@@ -355,3 +350,55 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = Non
             
     result += "\n<i>*Izoh: Ro'yxat jadvallardagi xonalar asosida avtomatik shakllantirildi.</i>"
     return result
+
+# =====================================================================
+# YANgi: O'QITUVCHILARNI IZLASH VA SARALASH FUNKSIYALARI
+# =====================================================================
+
+async def get_all_teachers_stats() -> dict:
+    """Barcha o'qituvchilarni fakulteti va dars soatlari soni bilan yig'ish"""
+    all_lessons = await _fetch_all_schedules()
+    teachers = {}
+    
+    for lsn in all_lessons:
+        t_name = lsn['oqituvchi'].strip()
+        if not t_name or t_name.lower() == "noma'lum":
+            continue
+            
+        t_upper = t_name.upper()
+        if t_upper not in teachers:
+            teachers[t_upper] = {
+                "faculty": lsn.get('fakultet', 'Boshqa fakultet'),
+                "count": 0
+            }
+        teachers[t_upper]["count"] += 1
+        
+    return teachers
+
+async def get_teachers_by_faculty(faculty_name: str) -> list:
+    """Tanlangan fakultetdagi o'qituvchilar ro'yxatini qaytaradi"""
+    teachers_data = await get_all_teachers_stats()
+    faculty_teachers = []
+    
+    for name, data in teachers_data.items():
+        if data["faculty"] == faculty_name:
+            faculty_teachers.append({"name": name, "count": data["count"]})
+            
+    # Alifbo tartibida saralash
+    return sorted(faculty_teachers, key=lambda x: x["name"])
+
+async def search_teacher_by_keyword(keyword: str) -> list:
+    """Ism yoki familiya orqali o'qituvchilarni izlash"""
+    teachers_data = await get_all_teachers_stats()
+    keyword_upper = keyword.strip().upper()
+    results = []
+    
+    for name, data in teachers_data.items():
+        if keyword_upper in name:
+            results.append({
+                "name": name, 
+                "faculty": data["faculty"],
+                "count": data["count"]
+            })
+            
+    return sorted(results, key=lambda x: x["name"])
