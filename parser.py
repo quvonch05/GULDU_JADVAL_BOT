@@ -23,8 +23,8 @@ def clear_all_caches():
     _LAST_CACHE_TIME = None
 
 async def fetch_html(url: str, data: dict = None) -> str:
-    # Sayt bloklamasligi uchun qisqa pauza (Anti-DDoS himoyasi)
-    await asyncio.sleep(0.1)
+    # Sayt bloklamasligi uchun juda qisqa pauza (Anti-DDoS)
+    await asyncio.sleep(0.05)
     async with aiohttp.ClientSession() as session:
         try:
             if data:
@@ -185,10 +185,6 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
 
     return result_text.strip()
 
-# =====================================================================
-# QOTIB QOLISHNI OLDINI OLUVCHI XAVFSIZ KESHLASH LOGIKASI
-# =====================================================================
-
 async def _fetch_all_schedules():
     global _ALL_SCHEDULES_CACHE, _LAST_CACHE_TIME, _IS_CACHING
     
@@ -197,9 +193,7 @@ async def _fetch_all_schedules():
     tz = timezone(timedelta(hours=5))
     now = datetime.now(tz)
     
-    # MUHIM O'ZGARISH: Foydalanuvchilar kutib qolmasligi uchun vaqt limiti (600s) olib tashlandi.
-    # Agar xotirada ma'lumot bor bo'lsa, uni doim darhol qaytaradi.
-    # Baza faqat administrator yangilaganda yoki fon rejimida (scheduler) yangilanadi.
+    # Kesh muddati cheklovi to'liq olib tashlandi
     if _ALL_SCHEDULES_CACHE:
         return _ALL_SCHEDULES_CACHE
         
@@ -210,14 +204,14 @@ async def _fetch_all_schedules():
         if not _CACHED_GROUPS:
             await search_group_id("DUMMY_LOAD")
             
-        # Sayt qotib qolmasligi uchun bir vaqtda faqat 2 ta guruhni tekshiramiz
-        sem = asyncio.Semaphore(2) 
+        # TEZLASHTIRISH: 10 ta guruhni bir vaqtda qayta ishlaydi
+        sem = asyncio.Semaphore(10) 
         
         async def fetch_group(gname, gid, session):
             faculty_name = _GROUP_FACULTY_MAP.get(gname.upper(), "Boshqa")
             async with sem:
-                # Har bir guruh orasiga 0.3 soniya sekinlashtirish qo'shildi
-                await asyncio.sleep(0.3)
+                # TEZLASHTIRISH: Pauza 0.05 soniyaga qisqartirildi
+                await asyncio.sleep(0.05)
                 try:
                     async with session.post(f"{BASE_URL}/ll.php", data={"datagroupid": str(gid)}) as resp:
                         if resp.status == 200:
@@ -279,9 +273,9 @@ async def _fetch_all_schedules():
                                             "fakultet": faculty_name
                                         })
                 except Exception as e:
-                    print(f"Guruh yuklashda xato ({gname}): {e}")
+                    pass
 
-        timeout = aiohttp.ClientTimeout(total=90)
+        timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as main_session:
             tasks = [fetch_group(gname, gid, main_session) for gname, gid in _CACHED_GROUPS.items()]
             await asyncio.gather(*tasks, return_exceptions=True) 
@@ -289,7 +283,6 @@ async def _fetch_all_schedules():
         if temp_cache:
             _ALL_SCHEDULES_CACHE = temp_cache
             _LAST_CACHE_TIME = now
-            print(f"✅ Baza muvaffaqiyatli yuklandi: {len(_ALL_SCHEDULES_CACHE)} ta dars bor.")
             
     finally:
         _IS_CACHING = False 
@@ -298,7 +291,7 @@ async def _fetch_all_schedules():
 
 async def search_teacher_schedule(teacher_name: str) -> str:
     if _IS_CACHING and not _ALL_SCHEDULES_CACHE:
-        return "⏳ <i>Ma'lumotlar bazasi hozir avtomatik yangilanmoqda. Iltimos, 1 daqiqadan so'ng qayta urinib ko'ring...</i>"
+        return "⏳ <i>Ma'lumotlar bazasi hozir avtomatik yangilanmoqda. Iltimos, 15 soniyadan so'ng qayta urinib ko'ring...</i>"
         
     all_lessons = await _fetch_all_schedules()
     if not all_lessons: return ""
@@ -322,7 +315,7 @@ async def search_teacher_schedule(teacher_name: str) -> str:
 
 async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = None) -> str:
     if _IS_CACHING and not _ALL_SCHEDULES_CACHE:
-        return "⏳ <i>Bo'sh xonalar ro'yxati hozir avtomatik yangilanmoqda. Iltimos, 1 daqiqadan so'ng qayta urinib ko'ring...</i>"
+        return "⏳ <i>Bo'sh xonalar ro'yxati hozir avtomatik yangilanmoqda. Iltimos, 15 soniyadan so'ng qayta urinib ko'ring...</i>"
         
     all_lessons = await _fetch_all_schedules()
     
@@ -359,10 +352,6 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = Non
             
     result += "\n<i>*Izoh: Ro'yxat jadvallardagi xonalar asosida avtomatik shakllantirildi.</i>"
     return result
-
-# =====================================================================
-# YANgi: O'QITUVCHILARNI IZLASH VA SARALASH FUNKSIYALARI
-# =====================================================================
 
 async def get_all_teachers_stats() -> dict:
     all_lessons = await _fetch_all_schedules()
