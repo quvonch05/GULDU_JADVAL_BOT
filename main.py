@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from aiohttp import web
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 from aiogram import Bot, Dispatcher, F
@@ -15,7 +15,8 @@ from aiogram.fsm.state import State, StatesGroup
 from database import init_db, set_user_group, get_all_users_id, get_user_group, get_active_groups
 from parser import (
     get_faculties, get_forms, get_courses, get_groups, 
-    get_schedule_text, search_group_id, search_teacher_schedule, get_rooms_status_by_faculty
+    get_schedule_text, search_group_id, search_teacher_schedule, get_rooms_status_by_faculty,
+    get_teachers_by_faculty, search_teacher_by_keyword, get_all_teachers_stats # YANGI QO'SHILDI
 )
 from scheduler import start_scheduler
 
@@ -33,7 +34,7 @@ class QidiruvHolati(StatesGroup):
     guruh_kutilmoqda = State()
     oqituvchi_kutilmoqda = State()
 
-# --- ASOSIY MENYU CHIZUVCHI FUNKSIYA (TEZLASHTIRILDI) ---
+# --- ASOSIY MENYU CHIZUVCHI FUNKSIYA ---
 async def send_main_menu(event: Message | CallbackQuery, user_id: int, first_name: str, state: FSMContext):
     await state.clear() 
     saved_group = await get_user_group(user_id)
@@ -43,8 +44,9 @@ async def send_main_menu(event: Message | CallbackQuery, user_id: int, first_nam
         "🏛 <b>GulDU Dars Jadvali Tizimi</b> ✨\n"
         "<i>Guliston Davlat Universiteti rasmiy dars jadvallarini qulay kuzatib boring.</i>\n\n"
         "Kerakli bo'limni tanlang:\n"
-        "• 👨‍🏫 <b>Fakultetlar bo'yicha:</b> Bosqichma-bosqich qidirish\n"
-        "• 🎯 <b>Guruhni qidirish:</b> Nom bo'yicha lahzada topish"
+        "• 🏢 <b>Fakultetlar bo'yicha:</b> Bosqichma-bosqich qidirish\n"
+        "• 🎯 <b>Guruhni qidirish:</b> Nom bo'yicha lahzada topish\n"
+        "• 👨‍🏫 <b>O'qituvchini qidirish:</b> O'qituvchilar dars jadvali"
     )
     
     if saved_group:
@@ -60,7 +62,7 @@ async def send_main_menu(event: Message | CallbackQuery, user_id: int, first_nam
         
     builder.button(text="🏛 Fakultetlar bo'yicha", callback_data="menu_faculties")
     builder.button(text="🎯 Guruhni qidirish", callback_data="menu_search")
-    builder.button(text="👨‍🏫 O'qituvchi jadvali", callback_data="menu_teacher_search")
+    builder.button(text="👨‍🏫 O'qituvchini qidirish", callback_data="menu_teacher_search")
     builder.button(text="🚪 Bo'sh auditoriyalar", callback_data="menu_empty_rooms")
     builder.button(text="ℹ️ Bot haqida", callback_data="menu_about")
     
@@ -85,6 +87,180 @@ async def cmd_start(message: Message, state: FSMContext):
         pass 
     await send_main_menu(message, message.from_user.id, message.from_user.first_name, state)
 
+@dp.callback_query(F.data == "ignore")
+async def ignore_callback(call: CallbackQuery):
+    await call.answer()
+
+# ======================================================================
+# --- YANGI O'QITUVCHI QIDIRISH TIZIMI ---
+# ======================================================================
+
+@dp.callback_query(F.data == "menu_teacher_search")
+async def menu_teacher_search(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    text = (
+        "👨‍🏫 <b>O'qituvchini qidirish</b>\n\n"
+        "Qidirish usulini tanlang:\n\n"
+        "• 🏢 <b>Fakultetlar bo'yicha:</b> Fakultetni tanlab, o'sha fakultetdagi domlalar ro'yxatini ko'rish\n"
+        "• 🔎 <b>Ism-familiya orqali:</b> Domlaning familiyasi yoki ismini yozib topish (Masalan: <code>ABDURAXIMOV D</code>)\n\n"
+        "<i>Domlaning dars vaqtlari, xonalari va qaysi guruhlarga dars berishini bilib oling.</i>"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🏢 Fakultetlar bo'yicha", callback_data="tsearch_fac")
+    builder.button(text="🔎 Ism-familiya orqali qidirish", callback_data="tsearch_name")
+    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+    builder.adjust(1, 1, 1)
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+# 1. FAKULTET BO'YICHA QIDIRISH
+@dp.callback_query(F.data == "tsearch_fac")
+async def tsearch_fac_menu(call: CallbackQuery):
+    faculties = await get_faculties()
+    builder = InlineKeyboardBuilder()
+    for fid, name in faculties.items():
+        builder.button(text=f"🏢 {name}", callback_data=f"tfac_{fid}_0")
+    builder.button(text="🔙 Orqaga", callback_data="menu_teacher_search")
+    builder.adjust(1)
+    await call.message.edit_text(
+        "🏢 <b>Fakultetni tanlang:</b>\n\n<i>Kerakli fakultetdagi o'qituvchilar ro'yxati ko'rsatiladi.</i>", 
+        reply_markup=builder.as_markup(), parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("tfac_"))
+async def tsearch_fac_list(call: CallbackQuery):
+    _, fid, page_str = call.data.split("_")
+    page = int(page_str)
+    
+    faculties = await get_faculties()
+    fac_name = faculties.get(fid, "")
+    teachers = await get_teachers_by_faculty(fac_name)
+    
+    ITEMS_PER_PAGE = 8
+    total_pages = max(1, (len(teachers) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+    
+    start_idx = page * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    current_teachers = teachers[start_idx:end_idx]
+    
+    text = (
+        f"👨‍🏫 <b>O'qituvchilar ro'yxati:</b>\n"
+        f"Jami: <b>{len(teachers)} nafar</b> o'qituvchi\n"
+        f"Sahifa: {page+1}/{total_pages}\n\n"
+        f"<i>Dars jadvalini ko'rish uchun o'qituvchini tanlang:</i>"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    for t in current_teachers:
+        builder.button(text=f"👨‍🏫 {t['name']} ({t['count']} ta dars)", callback_data=f"tsch_{t['name']}_haftalik")
+        
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="◀️ Oldingi", callback_data=f"tfac_{fid}_{page-1}"))
+    nav_buttons.append(InlineKeyboardButton(text=f"📄 {page+1}/{total_pages}", callback_data="ignore"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Keyingi ▶️", callback_data=f"tfac_{fid}_{page+1}"))
+    
+    builder.adjust(1)
+    builder.row(*nav_buttons)
+    builder.row(
+        InlineKeyboardButton(text="🌎 Fakultetlar ro'yxati", callback_data="tsearch_fac"),
+        InlineKeyboardButton(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+    )
+    
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+# 2. ISM BO'YICHA QIDIRISH
+@dp.callback_query(F.data == "tsearch_name")
+async def ask_teacher_name(call: CallbackQuery, state: FSMContext):
+    text = (
+        "🔎 <b>O'qituvchining ism yoki familiyasini yozing:</b>\n\n"
+        "Masalan: <code>ABDURAXIMOV D</code> yoki <code>Tishlikov</code>\n\n"
+        "<i>Kerakli domlaning dars jadvali, auditoriyasi va dars vaqtlarini topib beramiz.</i>"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Qidiruvni bekor qilish", callback_data="menu_teacher_search")
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await state.set_state(QidiruvHolati.oqituvchi_kutilmoqda)
+
+@dp.message(QidiruvHolati.oqituvchi_kutilmoqda)
+async def process_teacher_name(message: Message, state: FSMContext):
+    keyword = message.text.strip()
+    wait_msg = await message.answer(f"⏳ <b>{keyword}</b> ismli o'qituvchi bazadan qidirilmoqda...", parse_mode="HTML")
+    
+    results = await search_teacher_by_keyword(keyword)
+    builder = InlineKeyboardBuilder()
+    
+    if not results:
+        builder.button(text="🔎 Qayta qidirish", callback_data="tsearch_name")
+        builder.button(text="👨‍‍🏫 Asosiy menyu", callback_data="menu_main")
+        builder.adjust(2)
+        await wait_msg.edit_text(f"❌ <b>{keyword}</b> ismli o'qituvchi topilmadi.\nIltimos, ismning bir qismini to'g'ri yozing.", reply_markup=builder.as_markup(), parse_mode="HTML")
+        return
+        
+    await state.clear()
+    for t in results[:15]: 
+        fac_short = t['faculty'][:25] + "..." if len(t['faculty']) > 25 else t['faculty']
+        btn_text = f"👨‍🏫 {t['name']} ({fac_short})"
+        builder.button(text=btn_text, callback_data=f"tsch_{t['name']}_haftalik")
+    
+    builder.button(text="🔎 Qayta qidirish", callback_data="tsearch_name")
+    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+    builder.adjust(1) 
+    
+    await wait_msg.edit_text(f"✅ <b>{len(results)} nafar o'qituvchi topildi. Tanlang:</b>", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+# 3. O'QITUVCHI JADVALI VA FILTRLAR (Bugun/Ertaga/Haftalik)
+@dp.callback_query(F.data.startswith("tsch_"))
+async def show_teacher_schedule(call: CallbackQuery):
+    data_parts = call.data.split("_", 2)
+    teacher_name = data_parts[1]
+    day_filter = data_parts[2]
+    
+    wait_msg = await call.message.edit_text(f"⏳ <b>{teacher_name}</b> jadvali yuklanmoqda...", parse_mode="HTML")
+    full_schedule_text = await search_teacher_schedule(teacher_name)
+    
+    if not full_schedule_text:
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔙 Orqaga", callback_data="menu_teacher_search")
+        await wait_msg.edit_text("❌ Jadval topilmadi.", reply_markup=builder.as_markup())
+        return
+
+    # Bugun va Ertaga filtlarini kod orqali matndan saralash
+    schedule_text = full_schedule_text
+    if day_filter in ["bugun", "ertaga"]:
+        tz = pytz.timezone('Asia/Tashkent')
+        target_dt = datetime.now(tz)
+        if day_filter == "ertaga":
+            target_dt += timedelta(days=1)
+        target_date_str = target_dt.strftime("%d.%m.%Y")
+        
+        blocks = full_schedule_text.split("━━━━━━━━━━━━━━━━━━\n")
+        filtered_lines = [blocks[0].split("\n\n")[0] + "\n\n"] 
+        
+        found = False
+        for block in blocks[1:]:
+            if target_date_str in block:
+                filtered_lines.append(block)
+                found = True
+                
+        if found:
+            schedule_text = "━━━━━━━━━━━━━━━━━━\n".join(filtered_lines)
+        else:
+            prefix = "Bugun" if day_filter == "bugun" else "Ertaga"
+            schedule_text = f"👨‍🏫 <b>{teacher_name} ishtirokidagi darslar:</b>\n\n🌴 <i>{prefix} darslar mavjud emas (Dam olish kuni).</i>"
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📅 Bugun", callback_data=f"tsch_{teacher_name}_bugun")
+    builder.button(text="⏰ Ertaga", callback_data=f"tsch_{teacher_name}_ertaga")
+    builder.button(text="🟢 Haftalik", callback_data=f"tsch_{teacher_name}_haftalik")
+    builder.button(text="🔎 Boshqa domla 👨‍🏫", callback_data="menu_teacher_search")
+    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+    builder.adjust(3, 2)
+    
+    await wait_msg.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+# ======================================================================
+
 @dp.callback_query(F.data.startswith("mygrp_"))
 async def show_my_group(call: CallbackQuery):
     group_name = call.data.split("_")[1]
@@ -104,32 +280,6 @@ async def show_my_group(call: CallbackQuery):
         await wait_msg.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
     else:
         await wait_msg.edit_text("❌ Guruh ma'lumotlari topilmadi.", reply_markup=InlineKeyboardBuilder().button(text="🔙 Orqaga", callback_data="menu_main").as_markup())
-
-@dp.callback_query(F.data == "menu_teacher_search")
-async def menu_teacher_search(call: CallbackQuery, state: FSMContext):
-    text = "👨‍🏫 <b>O'qituvchi ism-sharifini kiriting</b>\n\n(Masalan: <i>ISMATILLAYEV A.</i> yoki qisman familiyasini):"
-    builder = InlineKeyboardBuilder()
-    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-    await state.set_state(QidiruvHolati.oqituvchi_kutilmoqda)
-
-@dp.message(QidiruvHolati.oqituvchi_kutilmoqda)
-async def process_teacher_search(message: Message, state: FSMContext):
-    teacher_name = message.text.strip()
-    wait_msg = await message.answer(f"⏳ <b>{teacher_name}</b> ismli o'qituvchi jadvali qidirilmoqda, kuting...", parse_mode="HTML")
-    
-    schedule_text = await search_teacher_schedule(teacher_name)
-    builder = InlineKeyboardBuilder()
-    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
-    
-    if schedule_text:
-        await wait_msg.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML")
-        await state.clear()
-    else:
-        await wait_msg.edit_text(
-            f"❌ <b>{teacher_name}</b> ismli o'qituvchi topilmadi yoki jadvali yo'q.\nIltimos, qayta kiriting.", 
-            reply_markup=builder.as_markup(), parse_mode="HTML"
-        )
 
 # --- BO'SH XONALAR (FAKULTETNI TANLASH - AVTOMATIK) ---
 @dp.callback_query(F.data == "menu_empty_rooms")
@@ -161,7 +311,7 @@ async def process_faculty_rooms(call: CallbackQuery):
     tz = pytz.timezone('Asia/Tashkent')
     current_time = datetime.now(tz).strftime("%H:%M")
     
-    rooms_text = await get_rooms_status_by_faculty(faculty_name, current_time)
+    rooms_text = await get_rooms_status_by_faculty(faculty_name)
     
     builder = InlineKeyboardBuilder()
     builder.button(text="🔄 Yangilash", callback_data=f"efac_{fid}")
@@ -169,7 +319,6 @@ async def process_faculty_rooms(call: CallbackQuery):
     builder.button(text="🏠 Asosiy menyu", callback_data="menu_main")
     
     builder.adjust(1, 2)
-    
     await wait_msg.edit_text(rooms_text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "menu_about")
@@ -180,7 +329,7 @@ async def menu_about(call: CallbackQuery):
         "<b>Asosiy imkoniyatlar:</b>\n"
         "🎯 <b>Guruhni qidirish:</b> Eng tezkor usul. Guruh nomini (masalan: <i>9-24AT</i>) yozib yuboring va jadvalni lahzada oling.\n"
         "🏛 <b>Fakultetlar bo'yicha:</b> Agar guruh nomini aniq bilmasangiz, fakultet, kurs va ta'lim shaklini tanlash orqali bosqichma-bosqich qidirishingiz mumkin.\n"
-        "👨‍🏫 <b>O'qituvchi jadvali:</b> Ustozingiz qachon, qaysi guruhga va qayerda dars o'tayotganini bilmoqchimisiz? Shunchaki ism-sharifini yozib qidiring.\n"
+        "👨‍🏫 <b>O'qituvchini qidirish:</b> Ustozingiz qachon, qaysi guruhga va qayerda dars o'tayotganini bilmoqchimisiz? Shunchaki fakulteti bo'yicha yoki ism-sharifini yozib qidiring.\n"
         "🚪 <b>Bo'sh auditoriyalar:</b> Fakultetni tanlang va ayni shu daqiqada qaysi xonalar bo'sh ekanligini, bandlarida esa qaysi guruh o'tirganini avtomatik tahlil orqali bilib oling.\n\n"
         "⭐ <b>Maxsus Imkoniyat (Mening guruhim)</b>\n"
         "O'z guruhingizni topgach, pastdagi <i>«📌 Asosiy guruh qilib saqlash»</i> tugmasini bosing. Shundan so'ng, Asosiy menyuda siz uchun maxsus tezkor tugma paydo bo'ladi. Dars boshlanishiga 30 daqiqa qolganda va jadvalda o'zgarish bo'lsa, bot sizga avtomatik eslatma yuboradi!\n\n"
