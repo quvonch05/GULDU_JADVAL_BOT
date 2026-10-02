@@ -137,7 +137,6 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
     
     result_text = f"👥 Guruh: <a href='https://data.guldu.uz'><b>{group_name}</b></a>\n📆 {header_title}\n\n"
     found_days = 0
-    date_text = "" # O'zgarishchini tepaga oldik
 
     cols = soup.find_all('div', class_='col-md-12')
     for col in cols:
@@ -200,81 +199,95 @@ async def _fetch_all_schedules():
         return _ALL_SCHEDULES_CACHE
         
     _IS_CACHING = True
-    temp_cache = []
-    
-    if not _CACHED_GROUPS:
-        await search_group_id("DUMMY_LOAD")
+    try:
+        temp_cache = []
         
-    sem = asyncio.Semaphore(5) 
-    
-    async def fetch_group(gname, gid, session):
-        faculty_name = _GROUP_FACULTY_MAP.get(gname.upper(), "Boshqa")
-        async with sem:
-            try:
-                async with session.post(f"{BASE_URL}/ll.php", data={"datagroupid": str(gid)}) as resp:
-                    if resp.status == 200:
-                        html = await resp.text()
-                        if not html or "dars jadvali" not in html.lower(): return
-                        
-                        soup = BeautifulSoup(html, 'html.parser')
-                        current_date_text = "" # Barcha paralarni qamrab olish uchun joriy sanani saqlaymiz
-                        
-                        for col in soup.find_all('div', class_='col-md-12'):
-                            date_p = col.find('p', class_='bg-primary')
-                            if date_p:
-                                current_date_text = " ".join(date_p.text.split())
+        if not _CACHED_GROUPS:
+            await search_group_id("DUMMY_LOAD")
+            
+        sem = asyncio.Semaphore(5) 
+        
+        async def fetch_group(gname, gid, session):
+            faculty_name = _GROUP_FACULTY_MAP.get(gname.upper(), "Boshqa")
+            async with sem:
+                try:
+                    async with session.post(f"{BASE_URL}/ll.php", data={"datagroupid": str(gid)}) as resp:
+                        if resp.status == 200:
+                            html = await resp.text()
+                            if not html or "dars jadvali" not in html.lower(): return
+                            
+                            soup = BeautifulSoup(html, 'html.parser')
+                            current_date_text = "" 
+                            
+                            for col in soup.find_all('div', class_='col-md-12'):
+                                date_p = col.find('p', class_='bg-primary')
+                                if date_p:
+                                    current_date_text = " ".join(date_p.text.split())
+                                    
+                                if not current_date_text: 
+                                    continue
                                 
-                            # Agar sana topilmagan bo'lsa (jadval boshi bo'sh bo'lsa), o'tkazib yuboramiz
-                            if not current_date_text: 
-                                continue
-                            
-                            table = col.find('table')
-                            if not table: continue
-                            
-                            time_th = table.find('th')
-                            time_text = " ".join(time_th.text.split()) if time_th else ""
-                            
-                            times = re.findall(r'\d{2}:\d{2}', time_text)
-                            start_time = times[0] if len(times) > 0 else "00:00"
-                            end_time = times[1] if len(times) > 1 else "23:59"
-                            
-                            j_match = re.search(r'(\d+-juftlik)', time_text, re.IGNORECASE)
-                            juftlik = j_match.group(1) if j_match else ""
-                            
-                            tds = table.find_all('td')
-                            if len(tds) >= 3:
-                                teacher = list(tds[0].stripped_strings)[-1] if len(list(tds[0].stripped_strings)) > 1 else ""
-                                s_parts = list(tds[1].stripped_strings)
-                                dars_turi = s_parts[0] if len(s_parts) > 1 else ""
-                                fan = " ".join(s_parts[1:]) if len(s_parts) > 1 else ""
-                                room = " ".join(list(tds[2].stripped_strings)[1:]) if len(list(tds[2].stripped_strings)) > 1 else ""
+                                table = col.find('table')
+                                if not table: continue
                                 
-                                if teacher and teacher.lower() != "noma'lum":
-                                    temp_cache.append({
-                                        "guruh_nomi": gname, 
-                                        "sana": current_date_text, # To'g'rilangan sana olinmoqda
-                                        "juftlik": juftlik,
-                                        "boshlanish_vaqti": start_time, 
-                                        "tugash_vaqti": end_time,
-                                        "oqituvchi": teacher, 
-                                        "fan": fan, 
-                                        "dars_turi": dars_turi, 
-                                        "auditoriya": room,
-                                        "fakultet": faculty_name
-                                    })
-            except Exception:
-                pass
+                                time_th = table.find('th')
+                                time_text = " ".join(time_th.text.split()) if time_th else ""
+                                
+                                # Vaqtni xatosiz va to'g'ri raqamli formatda olish uchun o'zgarish kiritildi (masalan, 8:30 ni 08:30 ga aylantiradi)
+                                times = re.findall(r'\d{1,2}:\d{2}', time_text)
+                                if len(times) > 0:
+                                    st_parts = times[0].split(":")
+                                    start_time = f"{int(st_parts[0]):02d}:{st_parts[1]}"
+                                else:
+                                    start_time = "00:00"
+                                    
+                                if len(times) > 1:
+                                    en_parts = times[1].split(":")
+                                    end_time = f"{int(en_parts[0]):02d}:{en_parts[1]}"
+                                else:
+                                    end_time = "23:59"
+                                
+                                j_match = re.search(r'(\d+-juftlik)', time_text, re.IGNORECASE)
+                                juftlik = j_match.group(1) if j_match else ""
+                                
+                                tds = table.find_all('td')
+                                if len(tds) >= 3:
+                                    teacher = list(tds[0].stripped_strings)[-1] if len(list(tds[0].stripped_strings)) > 1 else ""
+                                    s_parts = list(tds[1].stripped_strings)
+                                    dars_turi = s_parts[0] if len(s_parts) > 1 else ""
+                                    fan = " ".join(s_parts[1:]) if len(s_parts) > 1 else ""
+                                    room = " ".join(list(tds[2].stripped_strings)[1:]) if len(list(tds[2].stripped_strings)) > 1 else ""
+                                    
+                                    if teacher and teacher.lower() != "noma'lum":
+                                        temp_cache.append({
+                                            "guruh_nomi": gname, 
+                                            "sana": current_date_text, 
+                                            "juftlik": juftlik,
+                                            "boshlanish_vaqti": start_time, 
+                                            "tugash_vaqti": end_time,
+                                            "oqituvchi": teacher, 
+                                            "fan": fan, 
+                                            "dars_turi": dars_turi, 
+                                            "auditoriya": room,
+                                            "fakultet": faculty_name
+                                        })
+                except Exception:
+                    pass
 
-    timeout = aiohttp.ClientTimeout(total=60)
-    async with aiohttp.ClientSession(timeout=timeout) as main_session:
-        tasks = [fetch_group(gname, gid, main_session) for gname, gid in _CACHED_GROUPS.items()]
-        await asyncio.gather(*tasks)
-    
-    if temp_cache:
-        _ALL_SCHEDULES_CACHE = temp_cache
-        _LAST_CACHE_TIME = now
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as main_session:
+            tasks = [fetch_group(gname, gid, main_session) for gname, gid in _CACHED_GROUPS.items()]
+            # Agar 1 ta guruh tortishda xato bersa ham qolganlari to'xtab qolmaydi
+            await asyncio.gather(*tasks, return_exceptions=True) 
         
-    _IS_CACHING = False
+        if temp_cache:
+            _ALL_SCHEDULES_CACHE = temp_cache
+            _LAST_CACHE_TIME = now
+            
+    finally:
+        # Tizim qotib qolsa ham baribir qulfni avtomatik ochib yuboradi
+        _IS_CACHING = False 
+        
     return _ALL_SCHEDULES_CACHE
 
 async def search_teacher_schedule(teacher_name: str) -> str:
@@ -301,13 +314,17 @@ async def search_teacher_schedule(teacher_name: str) -> str:
         )
     return result
 
-async def get_rooms_status_by_faculty(faculty_name: str, current_time: str) -> str:
+async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = None) -> str:
     if _IS_CACHING and not _ALL_SCHEDULES_CACHE:
         return "⏳ <i>Bo'sh xonalar ro'yxati hozir avtomatik yangilanmoqda. Iltimos, 1 daqiqadan so'ng qayta urinib ko'ring...</i>"
         
     all_lessons = await _fetch_all_schedules()
+    
+    # MUHIM O'ZGARISH: Tashqaridan berilgan vaqtga qaramaydi, o'zi AYNAN HOZIRGI aniq vaqtni jonli hisoblab oladi
     tz = timezone(timedelta(hours=5))
-    today_str = datetime.now(tz).strftime("%d.%m.%Y")
+    now_dt = datetime.now(tz)
+    today_str = now_dt.strftime("%d.%m.%Y")
+    real_current_time = now_dt.strftime("%H:%M") 
     
     faculty_all_rooms = set()
     occupied_rooms = {}
@@ -320,13 +337,14 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str) -> s
             faculty_all_rooms.add(room)
             
         if today_str in lsn['sana']:
-            if lsn['boshlanish_vaqti'] <= current_time <= lsn['tugash_vaqti']:
+            # Bot vaqtni hisoblashda endi eski emas, jonli real_current_time dan foydalanadi
+            if lsn['boshlanish_vaqti'] <= real_current_time <= lsn['tugash_vaqti']:
                 occupied_rooms[room] = lsn['guruh_nomi']
                 
     if not faculty_all_rooms:
         return f"❌ <i>{faculty_name} uchun dars jadvalida aniq xonalar ko'rsatilmagan.</i>"
         
-    result = f"🏢 <b>{faculty_name} dars xonalari ({current_time}):</b>\n\n"
+    result = f"🏢 <b>{faculty_name} dars xonalari ({real_current_time}):</b>\n\n"
     
     for room in sorted(faculty_all_rooms):
         if room in occupied_rooms:
