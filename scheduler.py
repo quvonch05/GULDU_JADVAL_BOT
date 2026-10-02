@@ -7,9 +7,15 @@ from aiogram import Bot
 
 from database import get_active_groups, get_users_by_group, get_all_users_id, get_user_group
 from parser import get_schedule_text, search_group_id
+import parser # YANGI: Keshni avtomatik yangilash uchun parser modulini chaqiramiz
 
 # Jadval o'zgarishlarini tekshirish uchun vaqtinchalik xotira
 _SCHEDULE_CACHE = {}
+
+async def auto_refresh_cache():
+    """Har 15 daqiqada orqa fonda barcha jadvallarni avtomatik yangilab turadi"""
+    parser._LAST_CACHE_TIME = None 
+    await parser._fetch_all_schedules()
 
 async def send_daily_briefing(bot: Bot):
     """Har kuni ertalab soat 07:00 da foydalanuvchilarga bugungi jadvalni yuborish"""
@@ -53,7 +59,7 @@ async def check_schedules(bot: Bot):
         # Faqat bugungi jadvalni olamiz
         schedule_text = await get_schedule_text(group_id, group_name, "bugun")
         
-        # MUHIM O'ZGARISH: Sayt qotganda keladigan xatolik matnlarini inkor qilish
+        # MUHIM: Sayt qotganda keladigan xatolik matnlarini inkor qilish
         if "Bunday sanada dars topilmadi" in schedule_text or "Dam olish kuni" in schedule_text or "hozircha dars jadvali kiritilmagan" in schedule_text:
             continue
 
@@ -125,5 +131,8 @@ def start_scheduler(bot: Bot):
     
     # 2. Har 1 daqiqada jadval o'zgarishi va darsga 30 daqiqa qolganini tekshirish
     scheduler.add_job(check_schedules, 'interval', minutes=1, args=[bot])
+    
+    # 3. Har 15 daqiqada bo'sh xonalar va umumiy keshni fon rejimida yangilash
+    scheduler.add_job(auto_refresh_cache, 'interval', minutes=15)
     
     scheduler.start()
