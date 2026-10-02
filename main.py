@@ -7,7 +7,7 @@ import pytz
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -19,7 +19,7 @@ from parser import (
     get_teachers_by_faculty, search_teacher_by_keyword, get_all_teachers_stats
 )
 from scheduler import start_scheduler
-import parser # Kesh holatini tekshirish uchun modulni chaqiramiz
+import parser 
 
 # DIQQAT: BotFather'dan olingan YANGI tokenni kiritishni unutmang!
 BOT_TOKEN = "8923062582:AAF8Vl3F0wTufeF3uZ8XEFbrpvu21XUbQy4"
@@ -65,7 +65,7 @@ async def send_main_menu(event: Message | CallbackQuery, user_id: int, first_nam
     builder.button(text="🎯 Guruhni qidirish", callback_data="menu_search")
     builder.button(text="👨‍🏫 O'qituvchini qidirish", callback_data="menu_teacher_search")
     builder.button(text="🚪 Bo'sh auditoriyalar", callback_data="menu_empty_rooms")
-    builder.button(text="ℹ️ Bot haqida", callback_data="menu_about")
+    builder.button(text="ℹ️️ Bot haqida", callback_data="menu_about")
     
     if saved_group:
         builder.adjust(1, 2, 2, 1)
@@ -129,13 +129,16 @@ async def tsearch_fac_menu(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("tfac_"))
 async def tsearch_fac_list(call: CallbackQuery):
-    # MUHIM O'ZGARISH: Orqa fonda baza yuklanayotgan bo'lsa xabar berish
     if parser._IS_CACHING and not parser._ALL_SCHEDULES_CACHE:
-        await call.answer("⏳ Ma'lumotlar bazasi hozir yangilanmoqda. Iltimos, 1 daqiqadan so'ng qayta urining!", show_alert=True)
+        await call.answer("⏳ Baza endigina ishga tushdi va yuklanmoqda (1-2 daqiqa). Iltimos, biroz kuting!", show_alert=True)
         return
 
-    _, fid, page_str = call.data.split("_")
-    page = int(page_str)
+    # Qotib qolmasligi uchun "Kuting" xabarini chiqaramiz
+    wait_msg = await call.message.edit_text("⏳ <i>Fakultet o'qituvchilari ro'yxati shakllantirilmoqda...</i>", parse_mode="HTML")
+
+    parts = call.data.split("_")
+    fid = parts[1]
+    page = int(parts[2])
     
     faculties = await get_faculties()
     fac_name = faculties.get(fid, "")
@@ -149,6 +152,7 @@ async def tsearch_fac_list(call: CallbackQuery):
     current_teachers = teachers[start_idx:end_idx]
     
     text = (
+        f"🏢 <b>Fakultet:</b> {fac_name}\n"
         f"👨‍🏫 <b>O'qituvchilar ro'yxati:</b>\n"
         f"Jami: <b>{len(teachers)} nafar</b> o'qituvchi\n"
         f"Sahifa: {page+1}/{total_pages}\n\n"
@@ -157,7 +161,8 @@ async def tsearch_fac_list(call: CallbackQuery):
     
     builder = InlineKeyboardBuilder()
     for t in current_teachers:
-        builder.button(text=f"👨‍🏫 {t['name']} ({t['count']} ta dars)", callback_data=f"tsch_{t['name']}_haftalik")
+        safe_name = t['name'][:25] # Telegram Error bermasligi uchun qisqartiriladi
+        builder.button(text=f"👨‍🏫 {t['name']} ({t['count']} ta dars)", callback_data=f"tsch_{safe_name}_haftalik")
         
     nav_buttons = []
     if page > 0:
@@ -167,13 +172,14 @@ async def tsearch_fac_list(call: CallbackQuery):
         nav_buttons.append(InlineKeyboardButton(text="Keyingi ▶️", callback_data=f"tfac_{fid}_{page+1}"))
     
     builder.adjust(1)
-    builder.row(*nav_buttons)
+    if len(teachers) > ITEMS_PER_PAGE:
+        builder.row(*nav_buttons)
     builder.row(
         InlineKeyboardButton(text="🌎 Fakultetlar ro'yxati", callback_data="tsearch_fac"),
-        InlineKeyboardButton(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+        InlineKeyboardButton(text="🏠 Asosiy menyu", callback_data="menu_main")
     )
     
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await wait_msg.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 # 2. ISM BO'YICHA QIDIRISH
 @dp.callback_query(F.data == "tsearch_name")
@@ -190,7 +196,6 @@ async def ask_teacher_name(call: CallbackQuery, state: FSMContext):
 
 @dp.message(QidiruvHolati.oqituvchi_kutilmoqda)
 async def process_teacher_name(message: Message, state: FSMContext):
-    # MUHIM O'ZGARISH: Orqa fonda baza yuklanayotgan bo'lsa xabar berish
     if parser._IS_CACHING and not parser._ALL_SCHEDULES_CACHE:
         await message.reply("⏳ <i>Ma'lumotlar bazasi hozir yangilanmoqda. Iltimos, 1 daqiqadan so'ng qayta urining...</i>", parse_mode="HTML")
         return
@@ -203,7 +208,7 @@ async def process_teacher_name(message: Message, state: FSMContext):
     
     if not results:
         builder.button(text="🔎 Qayta qidirish", callback_data="tsearch_name")
-        builder.button(text="👨‍‍🏫 Asosiy menyu", callback_data="menu_main")
+        builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
         builder.adjust(2)
         await wait_msg.edit_text(f"❌ <b>{keyword}</b> ismli o'qituvchi topilmadi.\nIltimos, ismning bir qismini to'g'ri yozing.", reply_markup=builder.as_markup(), parse_mode="HTML")
         return
@@ -211,8 +216,9 @@ async def process_teacher_name(message: Message, state: FSMContext):
     await state.clear()
     for t in results[:15]: 
         fac_short = t['faculty'][:25] + "..." if len(t['faculty']) > 25 else t['faculty']
+        safe_name = t['name'][:25]
         btn_text = f"👨‍🏫 {t['name']} ({fac_short})"
-        builder.button(text=btn_text, callback_data=f"tsch_{t['name']}_haftalik")
+        builder.button(text=btn_text, callback_data=f"tsch_{safe_name}_haftalik")
     
     builder.button(text="🔎 Qayta qidirish", callback_data="tsearch_name")
     builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
@@ -236,7 +242,6 @@ async def show_teacher_schedule(call: CallbackQuery):
         await wait_msg.edit_text("❌ Jadval topilmadi.", reply_markup=builder.as_markup())
         return
 
-    # Bugun va Ertaga filtlarini kod orqali matndan saralash
     schedule_text = full_schedule_text
     if day_filter in ["bugun", "ertaga"]:
         tz = pytz.timezone('Asia/Tashkent')
@@ -260,12 +265,13 @@ async def show_teacher_schedule(call: CallbackQuery):
             prefix = "Bugun" if day_filter == "bugun" else "Ertaga"
             schedule_text = f"👨‍🏫 <b>{teacher_name} ishtirokidagi darslar:</b>\n\n🌴 <i>{prefix} darslar mavjud emas (Dam olish kuni).</i>"
 
+    safe_name = teacher_name[:25]
     builder = InlineKeyboardBuilder()
-    builder.button(text="📅 Bugun", callback_data=f"tsch_{teacher_name}_bugun")
-    builder.button(text="⏰ Ertaga", callback_data=f"tsch_{teacher_name}_ertaga")
-    builder.button(text="🟢 Haftalik", callback_data=f"tsch_{teacher_name}_haftalik")
+    builder.button(text="📅 Bugun", callback_data=f"tsch_{safe_name}_bugun")
+    builder.button(text="⏰ Ertaga", callback_data=f"tsch_{safe_name}_ertaga")
+    builder.button(text="🟢 Haftalik", callback_data=f"tsch_{safe_name}_haftalik")
     builder.button(text="🔎 Boshqa domla 👨‍🏫", callback_data="menu_teacher_search")
-    builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+    builder.button(text="🏠 Asosiy menyu", callback_data="menu_main")
     builder.adjust(3, 2)
     
     await wait_msg.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -292,43 +298,32 @@ async def show_my_group(call: CallbackQuery):
     else:
         await wait_msg.edit_text("❌ Guruh ma'lumotlari topilmadi.", reply_markup=InlineKeyboardBuilder().button(text="🔙 Orqaga", callback_data="menu_main").as_markup())
 
-# --- BO'SH XONALAR (FAKULTETNI TANLASH - AVTOMATIK) ---
 @dp.callback_query(F.data == "menu_empty_rooms")
 async def show_buildings_menu(call: CallbackQuery):
     faculties = await get_faculties()
     builder = InlineKeyboardBuilder()
-    
     for fid, name in faculties.items():
         builder.button(text=f"🏢 {name}", callback_data=f"efac_{fid}")
-        
     builder.button(text="🔙 Asosiy menyu", callback_data="menu_main")
     builder.adjust(1)
-    
     await call.message.edit_text(
         "🏢 <b>Qaysi fakultetga tegishli dars xonalarini tekshirmoqchisiz?</b>\n\nRo'yxatdan tanlang:", 
-        reply_markup=builder.as_markup(), 
-        parse_mode="HTML"
+        reply_markup=builder.as_markup(), parse_mode="HTML"
     )
 
-# --- TANLANGAN FAKULTET XONALARINI KO'RSATISH ---
 @dp.callback_query(F.data.startswith("efac_"))
 async def process_faculty_rooms(call: CallbackQuery):
     fid = call.data.split("_")[1]
     faculties = await get_faculties()
     faculty_name = faculties.get(fid, "Noma'lum fakultet")
-    
     wait_msg = await call.message.edit_text(f"⏳ <b>{faculty_name}</b> xonalari bazadan izlanib, tahlil qilinmoqda...", parse_mode="HTML")
-    
     tz = pytz.timezone('Asia/Tashkent')
     current_time = datetime.now(tz).strftime("%H:%M")
-    
     rooms_text = await get_rooms_status_by_faculty(faculty_name)
-    
     builder = InlineKeyboardBuilder()
     builder.button(text="🔄 Yangilash", callback_data=f"efac_{fid}")
     builder.button(text="🔙 Fakultetlar ro'yxati", callback_data="menu_empty_rooms")
     builder.button(text="🏠 Asosiy menyu", callback_data="menu_main")
-    
     builder.adjust(1, 2)
     await wait_msg.edit_text(rooms_text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
@@ -520,7 +515,7 @@ async def ask_broadcast_msg(call: CallbackQuery, state: FSMContext):
     if call.from_user.id not in ADMIN_IDS: return
     builder = InlineKeyboardBuilder()
     builder.button(text="❌ Bekor qilish", callback_data="admin_back")
-    await call.message.edit_text("✍️ <b>Tarqatmoqchi bo'lgan xabaringizni yuboring:</b>\n\n(Matn, rasm yoki video qabul qilinadi)", reply_markup=builder.as_markup(), parse_mode="HTML")
+    await call.message.edit_text("✍️️ <b>Tarqatmoqchi bo'lgan xabaringizni yuboring:</b>\n\n(Matn, rasm yoki video qabul qilinadi)", reply_markup=builder.as_markup(), parse_mode="HTML")
     await state.set_state(AdminStates.waiting_for_broadcast)
 
 @dp.message(AdminStates.waiting_for_broadcast)
