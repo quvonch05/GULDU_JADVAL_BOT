@@ -23,6 +23,8 @@ def clear_all_caches():
     _LAST_CACHE_TIME = None
 
 async def fetch_html(url: str, data: dict = None) -> str:
+    # Sayt bloklamasligi uchun qisqa pauza (Anti-DDoS himoyasi)
+    await asyncio.sleep(0.1)
     async with aiohttp.ClientSession() as session:
         try:
             if data:
@@ -171,7 +173,7 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
                 
                 result_text += f"⏰ {time_text} • {s_type_emoji} [{s_type}]\n"
                 result_text += f"📖 Fan: {s_name}\n"
-                result_text += f"👨‍🏫 O'qituvchi: {teacher}\n"
+                result_text += f"👨‍‍🏫 O'qituvchi: {teacher}\n"
                 result_text += f"🏫 Auditoriya: {room}\n\n"
 
     if found_days == 0:
@@ -205,11 +207,14 @@ async def _fetch_all_schedules():
         if not _CACHED_GROUPS:
             await search_group_id("DUMMY_LOAD")
             
-        sem = asyncio.Semaphore(5) 
+        # O'ZGARISH: Sayt qotib qolmasligi uchun bir vaqtda faqat 2 ta guruhni tekshiramiz
+        sem = asyncio.Semaphore(2) 
         
         async def fetch_group(gname, gid, session):
             faculty_name = _GROUP_FACULTY_MAP.get(gname.upper(), "Boshqa")
             async with sem:
+                # O'ZGARISH: Har bir guruh orasiga 0.3 soniya sekinlashtirish qo'shildi
+                await asyncio.sleep(0.3)
                 try:
                     async with session.post(f"{BASE_URL}/ll.php", data={"datagroupid": str(gid)}) as resp:
                         if resp.status == 200:
@@ -270,10 +275,10 @@ async def _fetch_all_schedules():
                                             "auditoriya": room,
                                             "fakultet": faculty_name
                                         })
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Guruh yuklashda xato ({gname}): {e}")
 
-        timeout = aiohttp.ClientTimeout(total=60)
+        timeout = aiohttp.ClientTimeout(total=90)
         async with aiohttp.ClientSession(timeout=timeout) as main_session:
             tasks = [fetch_group(gname, gid, main_session) for gname, gid in _CACHED_GROUPS.items()]
             await asyncio.gather(*tasks, return_exceptions=True) 
@@ -281,6 +286,7 @@ async def _fetch_all_schedules():
         if temp_cache:
             _ALL_SCHEDULES_CACHE = temp_cache
             _LAST_CACHE_TIME = now
+            print(f"✅ Baza muvaffaqiyatli yuklandi: {len(_ALL_SCHEDULES_CACHE)} ta dars bor.")
             
     finally:
         _IS_CACHING = False 
@@ -356,7 +362,6 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = Non
 # =====================================================================
 
 async def get_all_teachers_stats() -> dict:
-    """Barcha o'qituvchilarni fakulteti va dars soatlari soni bilan yig'ish"""
     all_lessons = await _fetch_all_schedules()
     teachers = {}
     
@@ -376,7 +381,6 @@ async def get_all_teachers_stats() -> dict:
     return teachers
 
 async def get_teachers_by_faculty(faculty_name: str) -> list:
-    """Tanlangan fakultetdagi o'qituvchilar ro'yxatini qaytaradi"""
     teachers_data = await get_all_teachers_stats()
     faculty_teachers = []
     
@@ -384,11 +388,9 @@ async def get_teachers_by_faculty(faculty_name: str) -> list:
         if data["faculty"] == faculty_name:
             faculty_teachers.append({"name": name, "count": data["count"]})
             
-    # Alifbo tartibida saralash
     return sorted(faculty_teachers, key=lambda x: x["name"])
 
 async def search_teacher_by_keyword(keyword: str) -> list:
-    """Ism yoki familiya orqali o'qituvchilarni izlash"""
     teachers_data = await get_all_teachers_stats()
     keyword_upper = keyword.strip().upper()
     results = []
