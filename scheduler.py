@@ -22,8 +22,8 @@ async def send_daily_briefing(bot: Bot):
             if group_id:
                 schedule_text = await get_schedule_text(group_id, group_name, "bugun")
                 
-                # Agar jadvalda "Dam olish kuni" yoki "dars topilmadi" yozuvi bo'lmasa, xabar yuboramiz
-                if "Dam olish kuni" not in schedule_text and "Bunday sanada dars topilmadi" not in schedule_text:
+                # Saytdagi xatoliklar va dam olish kunlarini inkor qilish
+                if "Dam olish kuni" not in schedule_text and "Bunday sanada dars topilmadi" not in schedule_text and "hozircha dars jadvali kiritilmagan" not in schedule_text:
                     msg_text = (
                         f"🌅 <b>Xayrli tong! Bugungi dars jadvalingiz bilan tanishing:</b>\n\n"
                         f"{schedule_text}\n\n"
@@ -53,7 +53,8 @@ async def check_schedules(bot: Bot):
         # Faqat bugungi jadvalni olamiz
         schedule_text = await get_schedule_text(group_id, group_name, "bugun")
         
-        if "Bunday sanada dars topilmadi" in schedule_text or "Dam olish kuni" in schedule_text:
+        # MUHIM O'ZGARISH: Sayt qotganda keladigan xatolik matnlarini inkor qilish
+        if "Bunday sanada dars topilmadi" in schedule_text or "Dam olish kuni" in schedule_text or "hozircha dars jadvali kiritilmagan" in schedule_text:
             continue
 
         # 1. O'ZGARISHLAR MONITORINGI
