@@ -16,9 +16,10 @@ from database import init_db, set_user_group, get_all_users_id, get_user_group, 
 from parser import (
     get_faculties, get_forms, get_courses, get_groups, 
     get_schedule_text, search_group_id, search_teacher_schedule, get_rooms_status_by_faculty,
-    get_teachers_by_faculty, search_teacher_by_keyword, get_all_teachers_stats # YANGI QO'SHILDI
+    get_teachers_by_faculty, search_teacher_by_keyword, get_all_teachers_stats
 )
 from scheduler import start_scheduler
+import parser # Kesh holatini tekshirish uchun modulni chaqiramiz
 
 # DIQQAT: BotFather'dan olingan YANGI tokenni kiritishni unutmang!
 BOT_TOKEN = "8923062582:AAF8Vl3F0wTufeF3uZ8XEFbrpvu21XUbQy4"
@@ -128,6 +129,11 @@ async def tsearch_fac_menu(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("tfac_"))
 async def tsearch_fac_list(call: CallbackQuery):
+    # MUHIM O'ZGARISH: Orqa fonda baza yuklanayotgan bo'lsa xabar berish
+    if parser._IS_CACHING and not parser._ALL_SCHEDULES_CACHE:
+        await call.answer("⏳ Ma'lumotlar bazasi hozir yangilanmoqda. Iltimos, 1 daqiqadan so'ng qayta urining!", show_alert=True)
+        return
+
     _, fid, page_str = call.data.split("_")
     page = int(page_str)
     
@@ -184,6 +190,11 @@ async def ask_teacher_name(call: CallbackQuery, state: FSMContext):
 
 @dp.message(QidiruvHolati.oqituvchi_kutilmoqda)
 async def process_teacher_name(message: Message, state: FSMContext):
+    # MUHIM O'ZGARISH: Orqa fonda baza yuklanayotgan bo'lsa xabar berish
+    if parser._IS_CACHING and not parser._ALL_SCHEDULES_CACHE:
+        await message.reply("⏳ <i>Ma'lumotlar bazasi hozir yangilanmoqda. Iltimos, 1 daqiqadan so'ng qayta urining...</i>", parse_mode="HTML")
+        return
+
     keyword = message.text.strip()
     wait_msg = await message.answer(f"⏳ <b>{keyword}</b> ismli o'qituvchi bazadan qidirilmoqda...", parse_mode="HTML")
     
@@ -561,8 +572,8 @@ async def main():
     await init_db()
     start_scheduler(bot)
     
-    from parser import _fetch_all_schedules
-    asyncio.create_task(_fetch_all_schedules())
+    import parser
+    asyncio.create_task(parser._fetch_all_schedules())
     
     app = web.Application()
     app.router.add_get('/', handle_ping)
