@@ -137,6 +137,7 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
     
     result_text = f"👥 Guruh: <a href='https://data.guldu.uz'><b>{group_name}</b></a>\n📆 {header_title}\n\n"
     found_days = 0
+    date_text = "" # O'zgarishchini tepaga oldik
 
     cols = soup.find_all('div', class_='col-md-12')
     for col in cols:
@@ -195,7 +196,6 @@ async def _fetch_all_schedules():
     tz = timezone(timedelta(hours=5))
     now = datetime.now(tz)
     
-    # MUHIM O'ZGARISH: Kesh xotirani saqlash vaqti 600 soniya (10 daqiqa) ga tushirildi
     if _LAST_CACHE_TIME and (now - _LAST_CACHE_TIME).total_seconds() < 600 and _ALL_SCHEDULES_CACHE:
         return _ALL_SCHEDULES_CACHE
         
@@ -217,10 +217,16 @@ async def _fetch_all_schedules():
                         if not html or "dars jadvali" not in html.lower(): return
                         
                         soup = BeautifulSoup(html, 'html.parser')
+                        current_date_text = "" # Barcha paralarni qamrab olish uchun joriy sanani saqlaymiz
+                        
                         for col in soup.find_all('div', class_='col-md-12'):
                             date_p = col.find('p', class_='bg-primary')
-                            if not date_p: continue
-                            date_text = " ".join(date_p.text.split())
+                            if date_p:
+                                current_date_text = " ".join(date_p.text.split())
+                                
+                            # Agar sana topilmagan bo'lsa (jadval boshi bo'sh bo'lsa), o'tkazib yuboramiz
+                            if not current_date_text: 
+                                continue
                             
                             table = col.find('table')
                             if not table: continue
@@ -245,9 +251,15 @@ async def _fetch_all_schedules():
                                 
                                 if teacher and teacher.lower() != "noma'lum":
                                     temp_cache.append({
-                                        "guruh_nomi": gname, "sana": date_text, "juftlik": juftlik,
-                                        "boshlanish_vaqti": start_time, "tugash_vaqti": end_time,
-                                        "oqituvchi": teacher, "fan": fan, "dars_turi": dars_turi, "auditoriya": room,
+                                        "guruh_nomi": gname, 
+                                        "sana": current_date_text, # To'g'rilangan sana olinmoqda
+                                        "juftlik": juftlik,
+                                        "boshlanish_vaqti": start_time, 
+                                        "tugash_vaqti": end_time,
+                                        "oqituvchi": teacher, 
+                                        "fan": fan, 
+                                        "dars_turi": dars_turi, 
+                                        "auditoriya": room,
                                         "fakultet": faculty_name
                                     })
             except Exception:
