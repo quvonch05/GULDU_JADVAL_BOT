@@ -195,7 +195,8 @@ async def _fetch_all_schedules():
     tz = timezone(timedelta(hours=5))
     now = datetime.now(tz)
     
-    if _LAST_CACHE_TIME and (now - _LAST_CACHE_TIME).total_seconds() < 3600 and _ALL_SCHEDULES_CACHE:
+    # MUHIM O'ZGARISH: Kesh xotirani saqlash vaqti 600 soniya (10 daqiqa) ga tushirildi
+    if _LAST_CACHE_TIME and (now - _LAST_CACHE_TIME).total_seconds() < 600 and _ALL_SCHEDULES_CACHE:
         return _ALL_SCHEDULES_CACHE
         
     _IS_CACHING = True
@@ -266,7 +267,7 @@ async def _fetch_all_schedules():
 
 async def search_teacher_schedule(teacher_name: str) -> str:
     if _IS_CACHING and not _ALL_SCHEDULES_CACHE:
-        return "⏳ <i>Ma'lumotlar bazasi hozir yangilanmoqda. Iltimos, 1-2 daqiqadan so'ng qayta urinib ko'ring...</i>"
+        return "⏳ <i>Ma'lumotlar bazasi hozir avtomatik yangilanmoqda. Iltimos, 1 daqiqadan so'ng qayta urinib ko'ring...</i>"
         
     all_lessons = await _fetch_all_schedules()
     if not all_lessons: return ""
@@ -290,7 +291,7 @@ async def search_teacher_schedule(teacher_name: str) -> str:
 
 async def get_rooms_status_by_faculty(faculty_name: str, current_time: str) -> str:
     if _IS_CACHING and not _ALL_SCHEDULES_CACHE:
-        return "⏳ <i>Ma'lumotlar bazasi hozir yangilanmoqda. Iltimos, birozdan so'ng qayta urinib ko'ring...</i>"
+        return "⏳ <i>Bo'sh xonalar ro'yxati hozir avtomatik yangilanmoqda. Iltimos, 1 daqiqadan so'ng qayta urinib ko'ring...</i>"
         
     all_lessons = await _fetch_all_schedules()
     tz = timezone(timedelta(hours=5))
