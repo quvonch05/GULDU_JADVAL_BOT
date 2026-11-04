@@ -23,50 +23,62 @@ def clear_all_caches():
     _LAST_CACHE_TIME = None
 
 def normalize_room_key(name: str) -> str:
-    """Xona nomini tozalash va raqamini (masalan: 517) ajratib olish uchun standart kalit yasash"""
+    """
+    Xona nomini bino nomi bilan birga standart holatga keltiradi.
+    Masalan: '517-auditoriya (Bosh bino)' va '517-xona (Bosh bino)' -> '517-xona (bosh bino)'
+    Bu orqali 101-xona (2-maktab) va 101-xona (Bosh bino) bir-biri bilan aralashib ketmaydi!
+    """
     if not name:
         return ""
-    # Faqat raqamlar va harflarni qoldiramiz yoki kichik harfga o'tkazamiz
     cleaned = " ".join(name.strip().lower().split())
     cleaned = cleaned.replace("auditoriya", "xona")
-    
-    # Agar xona nomida raqam bo'lsa (masalan: "517-xona", "517", "517 (bosh bino)"), 
-    # eng birinchi kelgan 3 yoki 4 xonali raqamni asosiy kalit qilib olamiz
-    numbers = re.findall(r'\d+', cleaned)
-    if numbers:
-        # Masalan: "517" raqamining o'zi ham kalitga qo'shiladi
-        return numbers[0]
+    # Defis atrofidagi ortiqcha bo'sh joylarni birlashtirish: "517 - xona" -> "517-xona"
+    cleaned = re.sub(r'\s*-\s*', '-', cleaned)
     return cleaned
 
-async def fetch_html(url: str, data: dict = None) -> str:
-    await asyncio.sleep(0.05)
-    async with aiohttp.ClientSession() as session:
+async def fetch_html(url: str, data: dict = None, retries: int = 3) -> str:
+    """Saytdan ma'lumot olish (uzilishlar bo'lsa qayta urinish bilan)"""
+    timeout = aiohttp.ClientTimeout(total=15)
+    for attempt in range(retries):
+        await asyncio.sleep(0.05)
         try:
-            if data:
-                async with session.post(url, data=data) as response:
-                    if response.status == 200: return await response.text()
-            else:
-                async with session.get(url) as response:
-                    if response.status == 200: return await response.text()
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                if data:
+                    async with session.post(url, data=data) as response:
+                        if response.status == 200:
+                            text = await response.text()
+                            if text.strip():
+                                return text
+                else:
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            text = await response.text()
+                            if text.strip():
+                                return text
         except Exception as e:
-            print(f"URL ga ulanishda xatolik: {e}")
+            if attempt == retries - 1:
+                print(f"URL ga ulanishda xatolik ({url}): {e}")
+            await asyncio.sleep(0.3)
     return ""
 
 async def get_faculties() -> dict:
-    if _CACHE_STRUCT['faculties']: return _CACHE_STRUCT['faculties']
+    if _CACHE_STRUCT['faculties']:
+        return _CACHE_STRUCT['faculties']
     html = await fetch_html(f"{BASE_URL}/")
     soup = BeautifulSoup(html, 'html.parser')
     faculties = {}
     for a in soup.find_all('a'):
         fid = a.get('data-id')
-        name = a.text.strip()
+        name = " ".join(a.text.split())
         if fid and name and name.lower() != "bosh sahifa":
             faculties[fid] = name
-    _CACHE_STRUCT['faculties'] = faculties
+    if faculties:
+        _CACHE_STRUCT['faculties'] = faculties
     return faculties
 
 async def get_forms(fakul_id: str) -> dict:
-    if fakul_id in _CACHE_STRUCT['forms']: return _CACHE_STRUCT['forms'][fakul_id]
+    if fakul_id in _CACHE_STRUCT['forms']:
+        return _CACHE_STRUCT['forms'][fakul_id]
     html = await fetch_html(f"{BASE_URL}/category.php?fakul_id={fakul_id}")
     soup = BeautifulSoup(html, 'html.parser')
     forms = {}
@@ -74,13 +86,15 @@ async def get_forms(fakul_id: str) -> dict:
         href = a.get('href', '')
         if 't_shakli_id=' in href:
             tid = href.split('t_shakli_id=')[-1].split('&')[0]
-            forms[tid] = a.text.strip()
-    _CACHE_STRUCT['forms'][fakul_id] = forms
+            forms[tid] = " ".join(a.text.split())
+    if forms:
+        _CACHE_STRUCT['forms'][fakul_id] = forms
     return forms
 
 async def get_courses(fakul_id: str, t_shakli_id: str) -> dict:
     cache_key = f"{fakul_id}_{t_shakli_id}"
-    if cache_key in _CACHE_STRUCT['courses']: return _CACHE_STRUCT['courses'][cache_key]
+    if cache_key in _CACHE_STRUCT['courses']:
+        return _CACHE_STRUCT['courses'][cache_key]
     html = await fetch_html(f"{BASE_URL}/kurs.php?fakul_id={fakul_id}&t_shakli_id={t_shakli_id}")
     soup = BeautifulSoup(html, 'html.parser')
     courses = {}
@@ -88,14 +102,19 @@ async def get_courses(fakul_id: str, t_shakli_id: str) -> dict:
         href = a.get('href', '')
         if 'kursid=' in href:
             kid = href.split('kursid=')[-1].split('&')[0]
-            courses[kid] = a.text.strip()
-    _CACHE_STRUCT['courses'][cache_key] = courses
+            courses[kid] = " ".join(a.text.split())
+    if courses:
+        _CACHE_STRUCT['courses'][cache_key] = courses
     return courses
 
 async def get_groups(fakul_id: str, t_shakli_id: str, kursid: str) -> dict:
     cache_key = f"{fakul_id}_{t_shakli_id}_{kursid}"
-    if cache_key in _CACHE_STRUCT['groups']: return _CACHE_STRUCT['groups'][cache_key]
-    html = await fetch_html(f"{BASE_URL}/group.php?kursid={kursid}&fraculid={fakul_id}&t_shakli_id={t_shakli_id}")
+    if cache_key in _CACHE_STRUCT['groups']:
+        return _CACHE_STRUCT['groups'][cache_key]
+    
+    # MUHIM TUZATISH: 'fraculid' xatosi tuzatildi, 'fakul_id' va 'fakulid' yuboriladi
+    url = f"{BASE_URL}/group.php?kursid={kursid}&fakul_id={fakul_id}&fakulid={fakul_id}&t_shakli_id={t_shakli_id}"
+    html = await fetch_html(url)
     soup = BeautifulSoup(html, 'html.parser')
     groups = {}
     for btn in soup.find_all('button', class_='btn'):
@@ -103,11 +122,14 @@ async def get_groups(fakul_id: str, t_shakli_id: str, kursid: str) -> dict:
         name = " ".join(btn.text.split())
         if gid and name:
             groups[gid] = name
-    _CACHE_STRUCT['groups'][cache_key] = groups
+    if groups:
+        _CACHE_STRUCT['groups'][cache_key] = groups
     return groups
 
 async def search_group_id(target_name: str) -> str:
     global _CACHED_GROUPS, _GROUP_FACULTY_MAP
+    if not target_name:
+        return None
     target = target_name.strip().upper()
     
     if not _CACHED_GROUPS:
@@ -120,15 +142,30 @@ async def search_group_id(target_name: str) -> str:
                     groups = await get_groups(fid, tid, kid)
                     for gid, gname in groups.items():
                         g_upper = gname.upper()
-                        _CACHED_GROUPS[g_upper] = gid
-                        _GROUP_FACULTY_MAP[g_upper] = fname
+                        # Agar guruh oldin boshqa fakultetga yozilmagan bo'lsagina saqlaymiz
+                        if g_upper not in _CACHED_GROUPS:
+                            _CACHED_GROUPS[g_upper] = gid
+                            _GROUP_FACULTY_MAP[g_upper] = fname
                         
     return _CACHED_GROUPS.get(target)
 
 async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "haftalik") -> str:
+    # MUHIM HIMOYA: Agar group_id raqam bo'lmasa (masalan, bazadan guruh nomi kelsa yoki None bo'lsa)
+    real_gid = str(group_id).strip() if group_id else ""
+    if not real_gid.isdigit():
+        found_id = await search_group_id(group_name or real_gid)
+        if found_id:
+            real_gid = str(found_id)
+
     url = f"{BASE_URL}/ll.php"
-    html = await fetch_html(url, data={"datagroupid": str(group_id)})
+    html = await fetch_html(url, data={"datagroupid": real_gid})
     
+    # Agar birinchi urinishda topilmasa, guruh nomi orqali ID ni qayta tekshirib ko'ramiz
+    if (not html.strip() or "dars jadvali" not in html.lower()) and group_name:
+        alt_gid = await search_group_id(group_name)
+        if alt_gid and str(alt_gid) != real_gid:
+            html = await fetch_html(url, data={"datagroupid": str(alt_gid)})
+
     if not html.strip() or "dars jadvali" not in html.lower():
         return "Bu guruh uchun hozircha dars jadvali kiritilmagan."
 
@@ -170,7 +207,11 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
 
         tables = col.find_all('table')
         for table in tables:
-            if table and current_date_text and (day_filter == "haftalik" or (day_filter == "bugun" and today_str in current_date_text) or (day_filter == "ertaga" and tomorrow_str in current_date_text)):
+            if table and current_date_text and (
+                day_filter == "haftalik" or 
+                (day_filter == "bugun" and today_str in current_date_text) or 
+                (day_filter == "ertaga" and tomorrow_str in current_date_text)
+            ):
                 time_th = table.find('th')
                 time_text = " ".join(time_th.text.split()) if time_th else "Vaqti noma'lum"
 
@@ -205,7 +246,11 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
 async def _fetch_all_schedules():
     global _ALL_SCHEDULES_CACHE, _LAST_CACHE_TIME, _IS_CACHING
     
-    if _IS_CACHING: return _ALL_SCHEDULES_CACHE
+    # Agar hozir keshlanayotgan bo'lsa, tugashini kutamiz (bo'sh ro'yxat qaytarib yubormaslik uchun)
+    while _IS_CACHING:
+        await asyncio.sleep(0.5)
+        if _ALL_SCHEDULES_CACHE:
+            return _ALL_SCHEDULES_CACHE
         
     tz = timezone(timedelta(hours=5))
     now = datetime.now(tz)
@@ -230,7 +275,8 @@ async def _fetch_all_schedules():
                     async with session.post(f"{BASE_URL}/ll.php", data={"datagroupid": str(gid)}) as resp:
                         if resp.status == 200:
                             html = await resp.text()
-                            if not html or "dars jadvali" not in html.lower(): return
+                            if not html or "dars jadvali" not in html.lower():
+                                return
                             
                             soup = BeautifulSoup(html, 'html.parser')
                             current_date_text = "" 
@@ -294,7 +340,7 @@ async def _fetch_all_schedules():
                 except Exception:
                     pass
 
-        timeout = aiohttp.ClientTimeout(total=45)
+        timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as main_session:
             tasks = [fetch_group(gname, gid, main_session) for gname, gid in _CACHED_GROUPS.items()]
             await asyncio.gather(*tasks, return_exceptions=True) 
@@ -313,7 +359,8 @@ async def search_teacher_schedule(teacher_name: str) -> str:
         return "⏳ <i>Ma'lumotlar bazasi hozir avtomatik yangilanmoqda. Iltimos, 15 soniyadan so'ng qayta urinib ko'ring...</i>"
         
     all_lessons = await _fetch_all_schedules()
-    if not all_lessons: return ""
+    if not all_lessons:
+        return ""
         
     teacher_upper = teacher_name.strip().upper()
     found = [
@@ -321,7 +368,8 @@ async def search_teacher_schedule(teacher_name: str) -> str:
         if lsn['oqituvchi'].lower() != "noma'lum" and teacher_upper in lsn['oqituvchi'].upper()
     ]
             
-    if not found: return ""
+    if not found:
+        return ""
     
     result = f"👨‍🏫 <b>{teacher_upper} ishtirokidagi darslar:</b>\n\n"
     for lsn in found:
@@ -349,9 +397,13 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = Non
     faculty_all_rooms = {}  # {room_key: original_room_name}
     occupied_rooms = {}     # {room_key: set(guruh_nomlari)}
     
-    # Joriy vaqt bo'yicha taxminiy juftlik raqamini aniqlash (soat bo'yicha adashib qolmaslik uchun)
-    # Masalan, 3-juftlik taxminan 13:30 - 16:00 oralig'ida bo'ladi
+    target_faculty = faculty_name.strip()
+    
     for lsn in all_lessons:
+        # FAQAT tanlangan fakultetga tegishli guruhlar va xonalarni olamiz
+        if lsn.get('fakultet', '').strip() != target_faculty:
+            continue
+            
         raw_room = lsn.get('auditoriya', '').strip()
         if not raw_room or raw_room.lower() == "noma'lum":
             continue
@@ -360,35 +412,16 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = Non
         if not room_key:
             continue
             
-        # Fakultetga tegishli barcha xonalarni to'playmiz
-        if lsn.get('fakultet') == faculty_name:
-            if room_key not in faculty_all_rooms:
-                faculty_all_rooms[room_key] = raw_room
+        # Fakultetga tegishli xonalar ro'yxatiga qo'shish
+        if room_key not in faculty_all_rooms:
+            faculty_all_rooms[room_key] = raw_room
             
-        # Bugungi darslami?
+        # Bugun va hozirgi dars vaqti oralig'ida shu xonada darsi bor shu fakultet guruhlarini yig'ish
         if today_str in lsn['sana']:
-            # 1-usul: Soat oralig'i bo'yicha tekshirish
-            time_match = lsn['boshlanish_vaqti'] <= real_current_time <= lsn['tugash_vaqti']
-            
-            # 2-usul (Zaxira): Agar soatlar bazada biroz farq qilsa ham, 
-            # hozirgi vaqtga mos keluvchi intervallarni kengroq qamrab olamiz yoki 
-            # agar soat 13:00-15:00 oralig'ida bo'lsa 3-juftlik deb qaraymiz.
-            if time_match:
-                if room_key not in occupied_rooms:
-                    occupied_rooms[room_key] = set()
-                occupied_rooms[room_key].add(lsn['guruh_nomi'])
-                
-    # Agar 517-xona hali qo'shilmagan bo'lsa-yu, lekin u biron darsda ishlatilayotgan bo'lsa, uni majburiy qo'shamiz
-    for lsn in all_lessons:
-        raw_room = lsn.get('auditoriya', '').strip()
-        if '517' in raw_room and today_str in lsn['sana']:
-            room_key = normalize_room_key(raw_room)
             if lsn['boshlanish_vaqti'] <= real_current_time <= lsn['tugash_vaqti']:
                 if room_key not in occupied_rooms:
                     occupied_rooms[room_key] = set()
                 occupied_rooms[room_key].add(lsn['guruh_nomi'])
-                if room_key not in faculty_all_rooms:
-                    faculty_all_rooms[room_key] = raw_room
 
     if not faculty_all_rooms:
         return f"❌ <i>{faculty_name} uchun dars jadvalida aniq xonalar ko'rsatilmagan.</i>"
@@ -398,15 +431,7 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = Non
     sorted_rooms = sorted(faculty_all_rooms.items(), key=lambda x: x[1])
     
     for room_key, original_room_name in sorted_rooms:
-        matched_groups = set()
-        
-        if room_key in occupied_rooms:
-            matched_groups.update(occupied_rooms[room_key])
-            
-        # Raqam bo'yicha moslashtirish (masalan, "517" kaliti ikkala nomda ham bir xil bo'ladi)
-        for occ_key, groups in occupied_rooms.items():
-            if room_key == occ_key or (len(room_key) >= 2 and room_key in occ_key):
-                matched_groups.update(groups)
+        matched_groups = occupied_rooms.get(room_key, set())
         
         if matched_groups:
             groups_str = ", ".join(sorted(matched_groups))
@@ -447,4 +472,16 @@ async def get_teachers_by_faculty(faculty_name: str) -> list:
     return sorted(faculty_teachers, key=lambda x: x["name"])
 
 async def search_teacher_by_keyword(keyword: str) -> list:
-    teachers_data = await get_all_teachers_
+    teachers_data = await get_all_teachers_stats()
+    keyword_upper = keyword.strip().upper()
+    results = []
+    
+    for name, data in teachers_data.items():
+        if keyword_upper in name:
+            results.append({
+                "name": name, 
+                "faculty": data["faculty"],
+                "count": data["count"]
+            })
+            
+    return sorted(results, key=lambda x: x["name"])
