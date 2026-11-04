@@ -3,11 +3,20 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import re
 import asyncio
+import ssl
 
 BASE_URL = "https://data.guldu.uz/dars"
+
+# SSL sertifikat xatoliklarini to'liq chetlab o'tish
+SSL_CONTEXT = ssl.create_default_context()
+SSL_CONTEXT.check_hostname = False
+SSL_CONTEXT.verify_mode = ssl.CERT_NONE
+
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "uz-UZ,uz;q=0.9,ru-RU;q=0.8,ru;q=0.7",
+    "Connection": "keep-alive"
 }
 
 _CACHED_GROUPS = {}  
@@ -36,24 +45,32 @@ def normalize_room_key(name: str) -> str:
     return cleaned
 
 async def fetch_html(url: str, data: dict = None) -> str:
-    await asyncio.sleep(0.05)
-    timeout = aiohttp.ClientTimeout(total=15)
-    connector = aiohttp.TCPConnector(ssl=False) # SSL xatoliklarini oldini olish
+    await asyncio.sleep(0.08)
+    timeout = aiohttp.ClientTimeout(total=20)
+    connector = aiohttp.TCPConnector(ssl=SSL_CONTEXT)
     
+    # HTTPS ishlamasa avtomatik HTTP orqali sinab ko'radi
+    urls_to_try = [url]
+    if url.startswith("https://"):
+        urls_to_try.append(url.replace("https://", "http://", 1))
+        
     async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout, connector=connector) as session:
-        for attempt in range(2): # Xato bo'lsa 2 marta urinib ko'radi
+        for target_url in urls_to_try:
             try:
                 if data:
-                    async with session.post(url, data=data) as response:
+                    async with session.post(target_url, data=data) as response:
                         if response.status == 200:
-                            return await response.text()
+                            text = await response.text()
+                            if text and text.strip():
+                                return text
                 else:
-                    async with session.get(url) as response:
+                    async with session.get(target_url) as response:
                         if response.status == 200:
-                            return await response.text()
+                            text = await response.text()
+                            if text and text.strip():
+                                return text
             except Exception as e:
-                print(f"URL ga ulanishda xatolik ({attempt+1}-urinish) [{url}]: {e}")
-                await asyncio.sleep(0.5)
+                print(f"[ULANISH XATOSI] {target_url} -> {repr(e)}")
     return ""
 
 async def get_faculties() -> dict:
@@ -72,7 +89,6 @@ async def get_faculties() -> dict:
         if fid and name and name.lower() != "bosh sahifa":
             faculties[fid] = name
             
-    # FAQAT ma'lumot topilsagina keshga saqlaymiz!
     if faculties:
         _CACHE_STRUCT['faculties'] = faculties
     return faculties
@@ -141,9 +157,10 @@ async def get_groups(fakul_id: str, t_shakli_id: str, kursid: str) -> dict:
 
 async def search_group_id(target_name: str) -> str:
     global _CACHED_GROUPS, _GROUP_FACULTY_MAP
+    if not target_name:
+        return None
+        
     target = " ".join(target_name.strip().upper().split())
-    
-    # Buyruqlarni guruh sifatida qidirmaslik uchun himoya
     if target.startswith("/"):
         return None
     
@@ -245,7 +262,8 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
 async def _fetch_all_schedules():
     global _ALL_SCHEDULES_CACHE, _LAST_CACHE_TIME, _IS_CACHING
     
-    if _IS_CACHING: return _ALL_SCHEDULES_CACHE
+    if _IS_CACHING:
+        return _ALL_SCHEDULES_CACHE
         
     tz = timezone(timedelta(hours=5))
     now = datetime.now(tz)
@@ -258,82 +276,86 @@ async def _fetch_all_schedules():
         temp_cache = []
         
         if not _CACHED_GROUPS:
-            await search_group_id("DUMMY_LOAD")
+            await search_group_id("LOAD_ALL")
             
-        sem = asyncio.Semaphore(10) 
+        # Sayt bloklab qo'ymasligi uchun bir vaqtda 4 ta so'rov bilan cheklaymiz
+        sem = asyncio.Semaphore(4) 
         
         async def fetch_group(gname, gid, session):
             faculty_name = _GROUP_FACULTY_MAP.get(gname.upper(), "Boshqa")
             async with sem:
-                await asyncio.sleep(0.05)
-                try:
-                    async with session.post(f"{BASE_URL}/ll.php", data={"datagroupid": str(gid)}) as resp:
-                        if resp.status == 200:
-                            html = await resp.text()
-                            if not html or "dars jadvali" not in html.lower(): return
-                            
-                            soup = BeautifulSoup(html, 'html.parser')
-                            current_date_text = "" 
-                            
-                            for col in soup.find_all('div', class_='col-md-12'):
-                                date_p = col.find('p', class_='bg-primary')
-                                if date_p:
-                                    current_date_text = " ".join(date_p.text.split())
-                                    
-                                if not current_date_text: 
-                                    continue
+                await asyncio.sleep(0.15)
+                for target_url in [f"{BASE_URL}/ll.php", f"{BASE_URL.replace('https://', 'http://')}/ll.php"]:
+                    try:
+                        async with session.post(target_url, data={"datagroupid": str(gid)}) as resp:
+                            if resp.status == 200:
+                                html = await resp.text()
+                                if not html or "dars jadvali" not in html.lower():
+                                    return
                                 
-                                tables = col.find_all('table')
-                                for table in tables:
-                                    time_th = table.find('th')
-                                    time_text = " ".join(time_th.text.split()) if time_th else ""
+                                soup = BeautifulSoup(html, 'html.parser')
+                                current_date_text = "" 
+                                
+                                for col in soup.find_all('div', class_='col-md-12'):
+                                    date_p = col.find('p', class_='bg-primary')
+                                    if date_p:
+                                        current_date_text = " ".join(date_p.text.split())
+                                        
+                                    if not current_date_text: 
+                                        continue
                                     
-                                    times = re.findall(r'\d{1,2}:\d{2}', time_text)
-                                    if len(times) > 0:
-                                        st_parts = times[0].split(":")
-                                        start_time = f"{int(st_parts[0]):02d}:{st_parts[1]}"
-                                    else:
-                                        start_time = "00:00"
+                                    tables = col.find_all('table')
+                                    for table in tables:
+                                        time_th = table.find('th')
+                                        time_text = " ".join(time_th.text.split()) if time_th else ""
                                         
-                                    if len(times) > 1:
-                                        en_parts = times[1].split(":")
-                                        end_time = f"{int(en_parts[0]):02d}:{en_parts[1]}"
-                                    else:
-                                        end_time = "23:59"
-                                    
-                                    j_match = re.search(r'(\d+-juftlik)', time_text, re.IGNORECASE)
-                                    juftlik = j_match.group(1) if j_match else ""
-                                    
-                                    tds = table.find_all('td')
-                                    if len(tds) >= 3:
-                                        t_strings = list(tds[0].stripped_strings)
-                                        teacher = t_strings[-1] if len(t_strings) > 1 else ""
+                                        times = re.findall(r'\d{1,2}:\d{2}', time_text)
+                                        if len(times) > 0:
+                                            st_parts = times[0].split(":")
+                                            start_time = f"{int(st_parts[0]):02d}:{st_parts[1]}"
+                                        else:
+                                            start_time = "00:00"
+                                            
+                                        if len(times) > 1:
+                                            en_parts = times[1].split(":")
+                                            end_time = f"{int(en_parts[0]):02d}:{en_parts[1]}"
+                                        else:
+                                            end_time = "23:59"
                                         
-                                        s_parts = list(tds[1].stripped_strings)
-                                        dars_turi = s_parts[0] if len(s_parts) > 1 else ""
-                                        fan = " ".join(s_parts[1:]) if len(s_parts) > 1 else ""
+                                        j_match = re.search(r'(\d+-juftlik)', time_text, re.IGNORECASE)
+                                        juftlik = j_match.group(1) if j_match else ""
                                         
-                                        r_strings = list(tds[2].stripped_strings)
-                                        room = " ".join(r_strings[1:]) if len(r_strings) > 1 else ""
-                                        
-                                        if room and room.lower() != "noma'lum":
-                                            temp_cache.append({
-                                                "guruh_nomi": gname, 
-                                                "sana": current_date_text, 
-                                                "juftlik": juftlik,
-                                                "boshlanish_vaqti": start_time, 
-                                                "tugash_vaqti": end_time,
-                                                "oqituvchi": teacher if teacher else "Noma'lum", 
-                                                "fan": fan, 
-                                                "dars_turi": dars_turi, 
-                                                "auditoriya": room,
-                                                "fakultet": faculty_name
-                                            })
-                except Exception:
-                    pass
+                                        tds = table.find_all('td')
+                                        if len(tds) >= 3:
+                                            t_strings = list(tds[0].stripped_strings)
+                                            teacher = t_strings[-1] if len(t_strings) > 1 else ""
+                                            
+                                            s_parts = list(tds[1].stripped_strings)
+                                            dars_turi = s_parts[0] if len(s_parts) > 1 else ""
+                                            fan = " ".join(s_parts[1:]) if len(s_parts) > 1 else ""
+                                            
+                                            r_strings = list(tds[2].stripped_strings)
+                                            room = " ".join(r_strings[1:]) if len(r_strings) > 1 else ""
+                                            
+                                            if room and room.lower() != "noma'lum":
+                                                temp_cache.append({
+                                                    "guruh_nomi": gname, 
+                                                    "sana": current_date_text, 
+                                                    "juftlik": juftlik,
+                                                    "boshlanish_vaqti": start_time, 
+                                                    "tugash_vaqti": end_time,
+                                                    "oqituvchi": teacher if teacher else "Noma'lum", 
+                                                    "fan": fan, 
+                                                    "dars_turi": dars_turi, 
+                                                    "auditoriya": room,
+                                                    "fakultet": faculty_name
+                                                })
+                                return
+                    except Exception:
+                        pass
 
-        timeout = aiohttp.ClientTimeout(total=60)
-        connector = aiohttp.TCPConnector(ssl=False)
+        timeout = aiohttp.ClientTimeout(total=90)
+        connector = aiohttp.TCPConnector(ssl=SSL_CONTEXT)
         async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout, connector=connector) as main_session:
             tasks = [fetch_group(gname, gid, main_session) for gname, gid in _CACHED_GROUPS.items()]
             await asyncio.gather(*tasks, return_exceptions=True) 
@@ -352,7 +374,8 @@ async def search_teacher_schedule(teacher_name: str) -> str:
         return "⏳ <i>Ma'lumotlar bazasi hozir avtomatik yangilanmoqda. Iltimos, 15 soniyadan so'ng qayta urinib ko'ring...</i>"
         
     all_lessons = await _fetch_all_schedules()
-    if not all_lessons: return ""
+    if not all_lessons:
+        return ""
         
     teacher_upper = teacher_name.strip().upper()
     found = [
@@ -360,7 +383,8 @@ async def search_teacher_schedule(teacher_name: str) -> str:
         if lsn['oqituvchi'].lower() != "noma'lum" and teacher_upper in lsn['oqituvchi'].upper()
     ]
             
-    if not found: return ""
+    if not found:
+        return ""
     
     result = f"👨‍🏫 <b>{teacher_upper} ishtirokidagi darslar:</b>\n\n"
     for lsn in found:
