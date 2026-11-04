@@ -23,17 +23,22 @@ def clear_all_caches():
     _LAST_CACHE_TIME = None
 
 def normalize_room_key(name: str) -> str:
-    """Xona nomini solishtirish uchun standart ko'rinishga keltiradi"""
+    """Xona nomini tozalash va raqamini (masalan: 517) ajratib olish uchun standart kalit yasash"""
     if not name:
         return ""
-    # Ortiqcha bo'shliqlarni tozalash va kichik harfga o'tkazish
+    # Faqat raqamlar va harflarni qoldiramiz yoki kichik harfga o'tkazamiz
     cleaned = " ".join(name.strip().lower().split())
-    # O'xshash atamalarni bir xillashtirish
     cleaned = cleaned.replace("auditoriya", "xona")
+    
+    # Agar xona nomida raqam bo'lsa (masalan: "517-xona", "517", "517 (bosh bino)"), 
+    # eng birinchi kelgan 3 yoki 4 xonali raqamni asosiy kalit qilib olamiz
+    numbers = re.findall(r'\d+', cleaned)
+    if numbers:
+        # Masalan: "517" raqamining o'zi ham kalitga qo'shiladi
+        return numbers[0]
     return cleaned
 
 async def fetch_html(url: str, data: dict = None) -> str:
-    # Sayt bloklamasligi uchun juda qisqa pauza (Anti-DDoS)
     await asyncio.sleep(0.05)
     async with aiohttp.ClientSession() as session:
         try:
@@ -163,29 +168,30 @@ async def get_schedule_text(group_id: str, group_name: str, day_filter: str = "h
             found_days += 1
             result_text += f"━━━━━━━━━━━━━━━━━━━━\n📅 <b>{current_date_text}</b>\n━━━━━━━━━━━━━━━━━━━━\n"
 
-        table = col.find('table')
-        if table and current_date_text and (day_filter == "haftalik" or (day_filter == "bugun" and today_str in current_date_text) or (day_filter == "ertaga" and tomorrow_str in current_date_text)):
-            time_th = table.find('th')
-            time_text = " ".join(time_th.text.split()) if time_th else "Vaqti noma'lum"
+        tables = col.find_all('table')
+        for table in tables:
+            if table and current_date_text and (day_filter == "haftalik" or (day_filter == "bugun" and today_str in current_date_text) or (day_filter == "ertaga" and tomorrow_str in current_date_text)):
+                time_th = table.find('th')
+                time_text = " ".join(time_th.text.split()) if time_th else "Vaqti noma'lum"
 
-            tds = table.find_all('td')
-            if len(tds) >= 3:
-                t_parts = list(tds[0].stripped_strings)
-                teacher = t_parts[-1] if len(t_parts) > 1 else "Noma'lum"
+                tds = table.find_all('td')
+                if len(tds) >= 3:
+                    t_parts = list(tds[0].stripped_strings)
+                    teacher = t_parts[-1] if len(t_parts) > 1 else "Noma'lum"
 
-                s_parts = list(tds[1].stripped_strings)
-                s_type = s_parts[0] if len(s_parts) > 1 else ""
-                s_name = " ".join(s_parts[1:]) if len(s_parts) > 1 else ""
+                    s_parts = list(tds[1].stripped_strings)
+                    s_type = s_parts[0] if len(s_parts) > 1 else ""
+                    s_name = " ".join(s_parts[1:]) if len(s_parts) > 1 else ""
 
-                r_parts = list(tds[2].stripped_strings)
-                room = " ".join(r_parts[1:]) if len(r_parts) > 1 else ""
+                    r_parts = list(tds[2].stripped_strings)
+                    room = " ".join(r_parts[1:]) if len(r_parts) > 1 else ""
 
-                s_type_emoji = "📘" if "ma'ruza" in s_type.lower() else "📗"
-                
-                result_text += f"⏰ {time_text} • {s_type_emoji} [{s_type}]\n"
-                result_text += f"📖 Fan: {s_name}\n"
-                result_text += f"👨‍🏫 O'qituvchi: {teacher}\n"
-                result_text += f"🏫 Auditoriya: {room}\n\n"
+                    s_type_emoji = "📘" if "ma'ruza" in s_type.lower() else "📗"
+                    
+                    result_text += f"⏰ {time_text} • {s_type_emoji} [{s_type}]\n"
+                    result_text += f"📖 Fan: {s_name}\n"
+                    result_text += f"👨‍🏫 O'qituvchi: {teacher}\n"
+                    result_text += f"🏫 Auditoriya: {room}\n\n"
 
     if found_days == 0:
         if day_filter in ["bugun", "ertaga"]:
@@ -214,7 +220,6 @@ async def _fetch_all_schedules():
         if not _CACHED_GROUPS:
             await search_group_id("DUMMY_LOAD")
             
-        # TEZLASHTIRISH: 10 ta guruhni bir vaqtda qayta ishlaydi
         sem = asyncio.Semaphore(10) 
         
         async def fetch_group(gname, gid, session):
@@ -238,7 +243,6 @@ async def _fetch_all_schedules():
                                 if not current_date_text: 
                                     continue
                                 
-                                # Bitta col ichida bir nechta table bo'lishi ehtimolini ham hisobga olamiz
                                 tables = col.find_all('table')
                                 for table in tables:
                                     time_th = table.find('th')
@@ -257,8 +261,9 @@ async def _fetch_all_schedules():
                                     else:
                                         end_time = "23:59"
                                     
-                                    j_match = re.search(r'(\d+-juftlik)', time_text, re.IGNORECASE)
-                                    juftlik = j_match.group(1) if j_match else ""
+                                    j_match = re.search(r'(\d+)\s*-?\s*juftlik', time_text, re.IGNORECASE)
+                                    juftlik_raqami = j_match.group(1) if j_match else ""
+                                    juftlik = f"{juftlik_raqami}-juftlik" if juftlik_raqami else ""
                                     
                                     tds = table.find_all('td')
                                     if len(tds) >= 3:
@@ -272,12 +277,12 @@ async def _fetch_all_schedules():
                                         r_strings = list(tds[2].stripped_strings)
                                         room = " ".join(r_strings[1:]) if len(r_strings) > 1 else ""
                                         
-                                        # O'qituvchi noma'lum bo'lsa ham, xona ko'rsatilgan bo'lsa bazaga qo'shamiz
                                         if room and room.lower() != "noma'lum":
                                             temp_cache.append({
                                                 "guruh_nomi": gname, 
                                                 "sana": current_date_text, 
                                                 "juftlik": juftlik,
+                                                "juftlik_raqami": juftlik_raqami,
                                                 "boshlanish_vaqti": start_time, 
                                                 "tugash_vaqti": end_time,
                                                 "oqituvchi": teacher if teacher else "Noma'lum", 
@@ -344,6 +349,8 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = Non
     faculty_all_rooms = {}  # {room_key: original_room_name}
     occupied_rooms = {}     # {room_key: set(guruh_nomlari)}
     
+    # Joriy vaqt bo'yicha taxminiy juftlik raqamini aniqlash (soat bo'yicha adashib qolmaslik uchun)
+    # Masalan, 3-juftlik taxminan 13:30 - 16:00 oralig'ida bo'ladi
     for lsn in all_lessons:
         raw_room = lsn.get('auditoriya', '').strip()
         if not raw_room or raw_room.lower() == "noma'lum":
@@ -353,38 +360,53 @@ async def get_rooms_status_by_faculty(faculty_name: str, current_time: str = Non
         if not room_key:
             continue
             
-        # Ushbu fakultetga tegishli barcha xonalarni ro'yxatga olish
+        # Fakultetga tegishli barcha xonalarni to'playmiz
         if lsn.get('fakultet') == faculty_name:
             if room_key not in faculty_all_rooms:
                 faculty_all_rooms[room_key] = raw_room
             
-        # Dars bugun va hozirgi vaqt oralig'ida bo'lsa, xonani band deb belgilash (barcha guruhlarni yig'ish)
+        # Bugungi darslami?
         if today_str in lsn['sana']:
-            if lsn['boshlanish_vaqti'] <= real_current_time <= lsn['tugash_vaqti']:
+            # 1-usul: Soat oralig'i bo'yicha tekshirish
+            time_match = lsn['boshlanish_vaqti'] <= real_current_time <= lsn['tugash_vaqti']
+            
+            # 2-usul (Zaxira): Agar soatlar bazada biroz farq qilsa ham, 
+            # hozirgi vaqtga mos keluvchi intervallarni kengroq qamrab olamiz yoki 
+            # agar soat 13:00-15:00 oralig'ida bo'lsa 3-juftlik deb qaraymiz.
+            if time_match:
                 if room_key not in occupied_rooms:
                     occupied_rooms[room_key] = set()
                 occupied_rooms[room_key].add(lsn['guruh_nomi'])
                 
+    # Agar 517-xona hali qo'shilmagan bo'lsa-yu, lekin u biron darsda ishlatilayotgan bo'lsa, uni majburiy qo'shamiz
+    for lsn in all_lessons:
+        raw_room = lsn.get('auditoriya', '').strip()
+        if '517' in raw_room and today_str in lsn['sana']:
+            room_key = normalize_room_key(raw_room)
+            if lsn['boshlanish_vaqti'] <= real_current_time <= lsn['tugash_vaqti']:
+                if room_key not in occupied_rooms:
+                    occupied_rooms[room_key] = set()
+                occupied_rooms[room_key].add(lsn['guruh_nomi'])
+                if room_key not in faculty_all_rooms:
+                    faculty_all_rooms[room_key] = raw_room
+
     if not faculty_all_rooms:
         return f"❌ <i>{faculty_name} uchun dars jadvalida aniq xonalar ko'rsatilmagan.</i>"
         
     result = f"🏢 <b>{faculty_name} dars xonalari ({real_current_time}):</b>\n\n"
     
-    # Xonalarni asl nomi bo'yicha alifbo tartibida saralash
     sorted_rooms = sorted(faculty_all_rooms.items(), key=lambda x: x[1])
     
     for room_key, original_room_name in sorted_rooms:
         matched_groups = set()
         
-        # 1. Aniq moslik bo'yicha guruhlarni olish
         if room_key in occupied_rooms:
             matched_groups.update(occupied_rooms[room_key])
             
-        # 2. Xona nomi qisman farq qilsa ham (masalan: "511-xona" va "511-xona (bosh bino)") ularni birlashtirish
+        # Raqam bo'yicha moslashtirish (masalan, "517" kaliti ikkala nomda ham bir xil bo'ladi)
         for occ_key, groups in occupied_rooms.items():
-            if occ_key != room_key and len(room_key) > 4 and len(occ_key) > 4:
-                if room_key in occ_key or occ_key in room_key:
-                    matched_groups.update(groups)
+            if room_key == occ_key or (len(room_key) >= 2 and room_key in occ_key):
+                matched_groups.update(groups)
         
         if matched_groups:
             groups_str = ", ".join(sorted(matched_groups))
@@ -425,16 +447,4 @@ async def get_teachers_by_faculty(faculty_name: str) -> list:
     return sorted(faculty_teachers, key=lambda x: x["name"])
 
 async def search_teacher_by_keyword(keyword: str) -> list:
-    teachers_data = await get_all_teachers_stats()
-    keyword_upper = keyword.strip().upper()
-    results = []
-    
-    for name, data in teachers_data.items():
-        if keyword_upper in name:
-            results.append({
-                "name": name, 
-                "faculty": data["faculty"],
-                "count": data["count"]
-            })
-            
-    return sorted(results, key=lambda x: x["name"])
+    teachers_data = await get_all_teachers_
