@@ -16,13 +16,13 @@ from database import init_db, set_user_group, get_all_users_id, get_user_group, 
 from parser import (
     get_faculties, get_forms, get_courses, get_groups, 
     get_schedule_text, search_group_id, search_teacher_schedule, get_rooms_status_by_faculty,
-    get_teachers_by_faculty, search_teacher_by_keyword, get_all_teachers_stats
+    get_teachers_by_faculty, search_teacher_by_keyword
 )
 from scheduler import start_scheduler
 import parser 
 
-# DIQQAT: BotFather'dan olingan YANGI tokenni kiritishni unutmang!
-BOT_TOKEN = "8923062582:AAF8Vl3F0wTufeF3uZ8XEFbrpvu21XUbQy4"
+# DIQQAT: BotFather'dan yangi token olib shu yerga yoki Render Environment'ga qo'ying!
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8923062582:AAF8Vl3F0wTufeF3uZ8XEFbrpvu21XUbQy4")
 ADMIN_IDS = [1686406789] 
 
 bot = Bot(token=BOT_TOKEN)
@@ -76,7 +76,7 @@ async def send_main_menu(event: Message | CallbackQuery, user_id: int, first_nam
         try:
             await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         except Exception:
-            pass
+            await event.message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         await event.answer()
     else: 
         await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -94,7 +94,7 @@ async def ignore_callback(call: CallbackQuery):
     await call.answer()
 
 # ======================================================================
-# --- YANGI O'QITUVCHI QIDIRISH TIZIMI ---
+# --- O'QITUVCHI QIDIRISH TIZIMI ---
 # ======================================================================
 
 @dp.callback_query(F.data == "menu_teacher_search")
@@ -119,6 +119,18 @@ async def menu_teacher_search(call: CallbackQuery, state: FSMContext):
 async def tsearch_fac_menu(call: CallbackQuery):
     faculties = await get_faculties()
     builder = InlineKeyboardBuilder()
+    
+    if not faculties:
+        builder.button(text="🔄 Qayta urinish", callback_data="tsearch_fac")
+        builder.button(text="🔙 Orqaga", callback_data="menu_teacher_search")
+        builder.adjust(1)
+        await call.message.edit_text(
+            "⚠️ <b>GulDU serveri bilan bog'lanishda xatolik yuz berdi.</b>\n<i>Iltimos, qayta urinib ko'ring.</i>",
+            reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+        await call.answer()
+        return
+
     for fid, name in faculties.items():
         builder.button(text=f"🏢 {name}", callback_data=f"tfac_{fid}_0")
     builder.button(text="🔙 Orqaga", callback_data="menu_teacher_search")
@@ -275,25 +287,36 @@ async def show_teacher_schedule(call: CallbackQuery):
     await call.answer()
 
 # ======================================================================
+# --- GURUH VA AUDITORIYALAR BO'LIMI ---
+# ======================================================================
 
 @dp.callback_query(F.data.startswith("mygrp_"))
 async def show_my_group(call: CallbackQuery):
-    group_name = call.data.split("_")[1]
+    group_name = call.data.split("_", 1)[1].strip()
     
     group_id = await search_group_id(group_name)
     if group_id:
         schedule_text = await get_schedule_text(group_id, group_name, "bugun") 
         builder = InlineKeyboardBuilder()
-        builder.button(text="✅ Bugun", callback_data=f"grp_{group_id}_{group_name}_bugun")
-        builder.button(text="⏰ Ertaga", callback_data=f"grp_{group_id}_{group_name}_ertaga")
-        builder.button(text="📚 Haftalik", callback_data=f"grp_{group_id}_{group_name}_haftalik")
+        builder.button(text="✅ Bugun", callback_data=f"grp|{group_id}|{group_name}|bugun")
+        builder.button(text="⏰ Ertaga", callback_data=f"grp|{group_id}|{group_name}|ertaga")
+        builder.button(text="📚 Haftalik", callback_data=f"grp|{group_id}|{group_name}|haftalik")
         builder.button(text="📌 Asosiy guruh qilib saqlash", callback_data=f"save_{group_name}")
         builder.button(text="🔍 Boshqa guruh", callback_data="menu_search")
         builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
         builder.adjust(3, 1, 2)
         await call.message.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
     else:
-        await call.message.edit_text("❌ Guruh ma'lumotlari topilmadi.", reply_markup=InlineKeyboardBuilder().button(text="🔙 Orqaga", callback_data="menu_main").as_markup())
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔄 Qayta urinish", callback_data=f"mygrp_{group_name}")
+        builder.button(text="🔍 Qaytadan qidirish", callback_data="menu_search")
+        builder.button(text="🔙 Orqaga", callback_data="menu_main")
+        builder.adjust(1)
+        await call.message.edit_text(
+            f"❌ <b>{group_name}</b> guruh ma'lumotlari topilmadi yoki GulDU sayti vaqtincha javob bermayapti.",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
     
     await call.answer()
 
@@ -301,6 +324,18 @@ async def show_my_group(call: CallbackQuery):
 async def show_buildings_menu(call: CallbackQuery):
     faculties = await get_faculties()
     builder = InlineKeyboardBuilder()
+    
+    if not faculties:
+        builder.button(text="🔄 Qayta urinish", callback_data="menu_empty_rooms")
+        builder.button(text="🔙 Asosiy menyu", callback_data="menu_main")
+        builder.adjust(1)
+        await call.message.edit_text(
+            "⚠️ <b>Fakultetlar ro'yxatini yuklab bo'lmadi.</b>\n<i>GulDU sayti vaqtincha javob bermayapti, qayta urinib ko'ring.</i>",
+            reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+        await call.answer()
+        return
+
     for fid, name in faculties.items():
         builder.button(text=f"🏢 {name}", callback_data=f"efac_{fid}")
     builder.button(text="🔙 Asosiy menyu", callback_data="menu_main")
@@ -313,7 +348,7 @@ async def show_buildings_menu(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("efac_"))
 async def process_faculty_rooms(call: CallbackQuery):
-    fid = call.data.split("_")[1]
+    fid = call.data.split("_", 1)[1]
     faculties = await get_faculties()
     faculty_name = faculties.get(fid, "Noma'lum fakultet")
     
@@ -365,6 +400,18 @@ async def back_to_main(call: CallbackQuery, state: FSMContext):
 async def show_faculties(call: CallbackQuery):
     faculties = await get_faculties()
     builder = InlineKeyboardBuilder()
+    
+    if not faculties:
+        builder.button(text="🔄 Qayta urinish", callback_data="menu_faculties")
+        builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
+        builder.adjust(1)
+        await call.message.edit_text(
+            "⚠️ <b>GulDU sayti bilan aloqa yo'q.</b>\n<i>Iltimos, qayta urinib ko'ring.</i>",
+            reply_markup=builder.as_markup(), parse_mode="HTML"
+        )
+        await call.answer()
+        return
+
     for fid, name in faculties.items():
         builder.button(text=f"👨‍🏫 {name}", callback_data=f"fac_{fid}")
     builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
@@ -374,7 +421,7 @@ async def show_faculties(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("fac_"))
 async def show_forms(call: CallbackQuery):
-    fakul_id = call.data.split("_")[1]
+    fakul_id = call.data.split("_", 1)[1]
     forms = await get_forms(fakul_id)
     builder = InlineKeyboardBuilder()
     for tid, name in forms.items():
@@ -387,7 +434,7 @@ async def show_forms(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("form_"))
 async def show_courses(call: CallbackQuery):
-    _, fakul_id, t_shakli_id = call.data.split("_")
+    _, fakul_id, t_shakli_id = call.data.split("_", 2)
     courses = await get_courses(fakul_id, t_shakli_id)
     builder = InlineKeyboardBuilder()
     for kid, name in courses.items():
@@ -400,20 +447,24 @@ async def show_courses(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("crs_"))
 async def show_groups(call: CallbackQuery):
-    _, fakul_id, t_shakli_id, kursid = call.data.split("_")
+    _, fakul_id, t_shakli_id, kursid = call.data.split("_", 3)
     groups = await get_groups(fakul_id, t_shakli_id, kursid)
     builder = InlineKeyboardBuilder()
     for gid, name in groups.items():
-        builder.button(text=f"👥 {name}", callback_data=f"grp_{gid}_{name}_haftalik")
+        builder.button(text=f"👥 {name}", callback_data=f"grp|{gid}|{name}|haftalik")
     builder.button(text="🔙 Kurslar", callback_data=f"form_{fakul_id}_{t_shakli_id}")
     builder.button(text="👨‍🏫 Bosh menyu", callback_data="menu_main")
     builder.adjust(2)
     await call.message.edit_text("👥 Guruhni tanlang:", reply_markup=builder.as_markup())
     await call.answer()
 
-@dp.callback_query(F.data.startswith("grp_"))
+@dp.callback_query(F.data.startswith("grp|") | F.data.startswith("grp_"))
 async def show_schedule(call: CallbackQuery):
-    data_parts = call.data.split("_")
+    if "|" in call.data:
+        data_parts = call.data.split("|")
+    else:
+        data_parts = call.data.split("_")
+        
     group_id = data_parts[1]
     group_name = data_parts[2]
     day_filter = data_parts[3] 
@@ -421,9 +472,9 @@ async def show_schedule(call: CallbackQuery):
     schedule_text = await get_schedule_text(group_id, group_name, day_filter)
     
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Bugun", callback_data=f"grp_{group_id}_{group_name}_bugun")
-    builder.button(text="⏰ Ertaga", callback_data=f"grp_{group_id}_{group_name}_ertaga")
-    builder.button(text="📚 Haftalik", callback_data=f"grp_{group_id}_{group_name}_haftalik")
+    builder.button(text="✅ Bugun", callback_data=f"grp|{group_id}|{group_name}|bugun")
+    builder.button(text="⏰ Ertaga", callback_data=f"grp|{group_id}|{group_name}|ertaga")
+    builder.button(text="📚 Haftalik", callback_data=f"grp|{group_id}|{group_name}|haftalik")
     builder.button(text="📌 Asosiy guruh qilib saqlash", callback_data=f"save_{group_name}")
     builder.button(text="🔍 Boshqa guruh", callback_data="menu_search")
     builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
@@ -434,14 +485,14 @@ async def show_schedule(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("save_"))
 async def save_group(call: CallbackQuery, state: FSMContext):
-    group_name = call.data.split("_")[1]
+    group_name = call.data.split("_", 1)[1].strip()
     await set_user_group(call.from_user.id, group_name)
     await call.answer(f"✅ {group_name} guruhi avto-eslatmalar uchun saqlandi!", show_alert=True)
     await send_main_menu(call, call.from_user.id, call.from_user.first_name, state)
 
 @dp.message(QidiruvHolati.guruh_kutilmoqda)
 async def process_group_search(message: Message, state: FSMContext):
-    matn = message.text.strip().upper()
+    matn = " ".join(message.text.strip().upper().split())
     if "-" not in matn or len(matn) < 4:
         await message.reply("Guruh formatida xatolik bor (masalan: 10-26AT):")
         return
@@ -451,9 +502,9 @@ async def process_group_search(message: Message, state: FSMContext):
     if group_id:
         schedule_text = await get_schedule_text(group_id, matn, "haftalik")
         builder = InlineKeyboardBuilder()
-        builder.button(text="✅ Bugun", callback_data=f"grp_{group_id}_{matn}_bugun")
-        builder.button(text="⏰ Ertaga", callback_data=f"grp_{group_id}_{matn}_ertaga")
-        builder.button(text="📚 Haftalik", callback_data=f"grp_{group_id}_{matn}_haftalik")
+        builder.button(text="✅ Bugun", callback_data=f"grp|{group_id}|{matn}|bugun")
+        builder.button(text="⏰ Ertaga", callback_data=f"grp|{group_id}|{matn}|ertaga")
+        builder.button(text="📚 Haftalik", callback_data=f"grp|{group_id}|{matn}|haftalik")
         builder.button(text="📌 Asosiy guruh qilib saqlash", callback_data=f"save_{matn}")
         builder.button(text="🔍 Boshqa guruh", callback_data="menu_search")
         builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
@@ -462,7 +513,7 @@ async def process_group_search(message: Message, state: FSMContext):
         await message.answer(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
         await state.clear()
     else:
-        await message.answer("❌ Bunday guruh topilmadi.")
+        await message.answer("❌ Bunday guruh topilmadi yoki sayt bilan aloqa uzilgan.")
 
 # ======================================================================
 # --- ADMIN PANEL FUNKSIYALARI ---
@@ -509,7 +560,6 @@ async def admin_refresh(call: CallbackQuery):
     if call.from_user.id not in ADMIN_IDS: return
     await call.answer("⏳ Bazadan yangi guruhlar va jadvallar yuklanmoqda...", show_alert=False)
     
-    import parser
     parser.clear_all_caches()
     await parser._fetch_all_schedules()
     
@@ -566,7 +616,7 @@ async def boshqa_xabarlar(message: Message, state: FSMContext):
     await message.reply("🙂 Iltimos, kerakli amallarni bajarish uchun /start buyrug'idan foydalaning yoki tugmalarni bosing.")
 
 # ======================================================================
-# --- SOXTA VEB-SERVER VA ISHGA TUSHIRISH ---
+# --- VEB-SERVER VA ISHGA TUSHIRISH ---
 # ======================================================================
 async def handle_ping(request):
     return web.Response(text="Bot is running! 24/7")
@@ -576,7 +626,9 @@ async def main():
     await init_db()
     start_scheduler(bot)
     
-    import parser
+    # Eski webhook yoki ulanishlarni tozalash (Conflict oldini olish uchun)
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     asyncio.create_task(parser._fetch_all_schedules())
     
     app = web.Application()
