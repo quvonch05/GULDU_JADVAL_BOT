@@ -22,7 +22,7 @@ from scheduler import start_scheduler
 import parser 
 
 # DIQQAT: BotFather'dan yangi token olib shu yerga yoki Render Environment'ga qo'ying!
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8923062582:AAF8Vl3F0wTufeF3uZ8XEFbrpvu21XUbQy4")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8923062582:AAHiTe1MlUm044nUFRmVq4pjHPOJQJIzW3k")
 ADMIN_IDS = [1686406789] 
 
 bot = Bot(token=BOT_TOKEN)
