@@ -5,3 +5,5 @@ APScheduler==3.10.3
 SQLAlchemy==2.0.20
 python-dotenv==1.0.0
 aiomysql==0.2.0
+asyncpg
+greenlet
