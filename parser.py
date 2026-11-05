@@ -4,10 +4,10 @@ from datetime import datetime, timedelta, timezone
 import re
 import asyncio
 import ssl
+from urllib.parse import quote
 
 BASE_URL = "https://data.guldu.uz/dars"
 
-# SSL sertifikat xatoliklarini to'liq chetlab o'tish
 SSL_CONTEXT = ssl.create_default_context()
 SSL_CONTEXT.check_hostname = False
 SSL_CONTEXT.verify_mode = ssl.CERT_NONE
@@ -16,7 +16,6 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "uz-UZ,uz;q=0.9,ru-RU;q=0.8,ru;q=0.7",
-    "Connection": "keep-alive"
 }
 
 _CACHED_GROUPS = {}  
@@ -25,10 +24,10 @@ _GROUP_FACULTY_MAP = {}
 _ALL_SCHEDULES_CACHE = []
 _LAST_CACHE_TIME = None
 _IS_CACHING = False 
+_IS_LOADING_GROUPS = False
 _CACHE_STRUCT = {'faculties': None, 'forms': {}, 'courses': {}, 'groups': {}}
 
 def clear_all_caches():
-    """Bot xotirasidagi barcha eskirgan ma'lumotlarni tozalaydi"""
     global _CACHE_STRUCT, _CACHED_GROUPS, _GROUP_FACULTY_MAP, _ALL_SCHEDULES_CACHE, _LAST_CACHE_TIME
     _CACHE_STRUCT = {'faculties': None, 'forms': {}, 'courses': {}, 'groups': {}}
     _CACHED_GROUPS = {}
@@ -37,7 +36,6 @@ def clear_all_caches():
     _LAST_CACHE_TIME = None
 
 def normalize_room_key(name: str) -> str:
-    """Xona nomini solishtirish uchun standart ko'rinishga keltiradi"""
     if not name:
         return ""
     cleaned = " ".join(name.strip().lower().split())
@@ -45,16 +43,15 @@ def normalize_room_key(name: str) -> str:
     return cleaned
 
 async def fetch_html(url: str, data: dict = None) -> str:
-    await asyncio.sleep(0.08)
-    timeout = aiohttp.ClientTimeout(total=20)
+    timeout = aiohttp.ClientTimeout(total=12)
     connector = aiohttp.TCPConnector(ssl=SSL_CONTEXT)
     
-    # HTTPS ishlamasa avtomatik HTTP orqali sinab ko'radi
     urls_to_try = [url]
     if url.startswith("https://"):
         urls_to_try.append(url.replace("https://", "http://", 1))
         
     async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout, connector=connector) as session:
+        # 1. To'g'ridan-to'g'ri ulanib ko'rish
         for target_url in urls_to_try:
             try:
                 if data:
@@ -70,7 +67,25 @@ async def fetch_html(url: str, data: dict = None) -> str:
                             if text and text.strip():
                                 return text
             except Exception as e:
-                print(f"[ULANISH XATOSI] {target_url} -> {repr(e)}")
+                print(f"[DIRECT XATO] {target_url} -> {repr(e)}")
+                
+        # 2. Agar Render IP bloklangan bo'lsa, GET so'rovlarni Web-Proxy orqali olish
+        if not data:
+            proxy_urls = [
+                f"https://api.allorigins.win/raw?url={quote(url)}",
+                f"https://api.codetabs.com/v1/proxy?quest={quote(url)}"
+            ]
+            for p_url in proxy_urls:
+                try:
+                    async with session.get(p_url) as response:
+                        if response.status == 200:
+                            text = await response.text()
+                            if text and text.strip():
+                                print(f"[PROXY ORQALI OLINDI] {url}")
+                                return text
+                except Exception as e:
+                    print(f"[PROXY XATO] {p_url} -> {repr(e)}")
+                    
     return ""
 
 async def get_faculties() -> dict:
@@ -155,8 +170,39 @@ async def get_groups(fakul_id: str, t_shakli_id: str, kursid: str) -> dict:
         _CACHE_STRUCT['groups'][cache_key] = groups
     return groups
 
+async def _load_all_groups_parallel():
+    """Barcha guruhlarni parallel ravishda tez yig'ib oladi"""
+    global _CACHED_GROUPS, _GROUP_FACULTY_MAP, _IS_LOADING_GROUPS
+    if _CACHED_GROUPS or _IS_LOADING_GROUPS:
+        return
+    _IS_LOADING_GROUPS = True
+    try:
+        facs = await get_faculties()
+        if not facs:
+            return
+
+        sem = asyncio.Semaphore(8)
+
+        async def load_faculty_tree(fid, fname):
+            async with sem:
+                forms = await get_forms(fid)
+            for tid in forms:
+                async with sem:
+                    courses = await get_courses(fid, tid)
+                for kid in courses:
+                    async with sem:
+                        groups = await get_groups(fid, tid, kid)
+                    for gid, gname in groups.items():
+                        g_upper = " ".join(gname.upper().split())
+                        _CACHED_GROUPS[g_upper] = gid
+                        _GROUP_FACULTY_MAP[g_upper] = fname
+
+        await asyncio.gather(*(load_faculty_tree(fid, fname) for fid, fname in facs.items()), return_exceptions=True)
+        print(f"[INFO] Jami {len(_CACHED_GROUPS)} ta guruh keshlandi!")
+    finally:
+        _IS_LOADING_GROUPS = False
+
 async def search_group_id(target_name: str) -> str:
-    global _CACHED_GROUPS, _GROUP_FACULTY_MAP
     if not target_name:
         return None
         
@@ -165,17 +211,7 @@ async def search_group_id(target_name: str) -> str:
         return None
     
     if not _CACHED_GROUPS:
-        facs = await get_faculties()
-        for fid, fname in facs.items():
-            forms = await get_forms(fid)
-            for tid in forms:
-                courses = await get_courses(fid, tid)
-                for kid in courses:
-                    groups = await get_groups(fid, tid, kid)
-                    for gid, gname in groups.items():
-                        g_upper = " ".join(gname.upper().split())
-                        _CACHED_GROUPS[g_upper] = gid
-                        _GROUP_FACULTY_MAP[g_upper] = fname
+        await _load_all_groups_parallel()
                         
     return _CACHED_GROUPS.get(target)
 
@@ -276,15 +312,14 @@ async def _fetch_all_schedules():
         temp_cache = []
         
         if not _CACHED_GROUPS:
-            await search_group_id("LOAD_ALL")
+            await _load_all_groups_parallel()
             
-        # Sayt bloklab qo'ymasligi uchun bir vaqtda 4 ta so'rov bilan cheklaymiz
-        sem = asyncio.Semaphore(4) 
+        sem = asyncio.Semaphore(5) 
         
         async def fetch_group(gname, gid, session):
             faculty_name = _GROUP_FACULTY_MAP.get(gname.upper(), "Boshqa")
             async with sem:
-                await asyncio.sleep(0.15)
+                await asyncio.sleep(0.1)
                 for target_url in [f"{BASE_URL}/ll.php", f"{BASE_URL.replace('https://', 'http://')}/ll.php"]:
                     try:
                         async with session.post(target_url, data={"datagroupid": str(gid)}) as resp:
