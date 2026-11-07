@@ -21,6 +21,7 @@ from parser import (
 from scheduler import start_scheduler
 import parser 
 
+# DIQQAT: BotFather'dan olingan YANGI tokenni kiritishni unutmang!
 BOT_TOKEN = "8923062582:AAHXuxWQJ4B2BeSxNzpJCfoeax4semGwzEU"
 ADMIN_IDS = [1686406789] 
 
@@ -324,10 +325,7 @@ async def process_faculty_rooms(call: CallbackQuery):
     builder.button(text="🏠 Asosiy menyu", callback_data="menu_main")
     builder.adjust(1, 2)
     
-    try:
-        await call.message.edit_text(rooms_text, reply_markup=builder.as_markup(), parse_mode="HTML")
-    except Exception:
-        pass
+    await call.message.edit_text(rooms_text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await call.answer()
 
 @dp.callback_query(F.data == "menu_about")
@@ -431,10 +429,7 @@ async def show_schedule(call: CallbackQuery):
     builder.button(text="👨‍🏫 Asosiy menyu", callback_data="menu_main")
     builder.adjust(3, 1, 2)
     
-    try:
-        await call.message.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
-    except Exception:
-        pass
+    await call.message.edit_text(schedule_text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
     await call.answer()
 
 @dp.callback_query(F.data.startswith("save_"))
@@ -514,6 +509,7 @@ async def admin_refresh(call: CallbackQuery):
     if call.from_user.id not in ADMIN_IDS: return
     await call.answer("⏳ Bazadan yangi guruhlar va jadvallar yuklanmoqda...", show_alert=False)
     
+    import parser
     parser.clear_all_caches()
     await parser._fetch_all_schedules()
     
@@ -580,6 +576,7 @@ async def main():
     await init_db()
     start_scheduler(bot)
     
+    import parser
     asyncio.create_task(parser._fetch_all_schedules())
     
     app = web.Application()
